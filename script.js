@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const mapContainer = document.getElementById('map');
     const uiContainer = document.getElementById('ui-container');
     const questionEl = document.getElementById('question');
+    const quitGameBtn = document.getElementById('quit-game-btn');
     const resultEl = document.getElementById('result');
     const nextRoundBtn = document.getElementById('next-round-btn');
     const gameOverContainer = document.getElementById('game-over-container');
@@ -44,6 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentRound = 0;
     let totalScore = 0;
     let availableCapitals = [];
+    let isEndlessMode = false; // Flag for endless mode
     let selectedDifficulty = null;
 
     // --- Data Storage for different difficulties ---
@@ -51,6 +53,11 @@ document.addEventListener('DOMContentLoaded', () => {
     let usStateCapitalsData = [];
     let europeanCapitalsData = [];
     let currentCapitalPool = []; // The pool of capitals for the current game
+    let gameNeverPlayedCapitals = []; // Capitals for the current game that have never been played
+    let gameWeightedPlayedCapitals = []; // Weighted list of previously played capitals for the current game
+    const RECENT_CAPITALS_LIMIT = 10; // How many recent capitals to avoid picking
+    let recentlyChosenCapitals = []; // Stores the last N chosen capitals
+    let cityScores = {}; // Stores best scores for each city: { "city-country": bestScore }
 
     // --- Functions ---
 
@@ -131,9 +138,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const transformedData = lines
                 .slice(1) // Skip the header row
                 .map(line => {
-                    const [name, capital, lat, lon] = line.split(',');
+                    const [name, capital, lat, lon] = line.split(','); // THIS IS THE CORRECT FORMAT, DO NOT CHANGE
                     return {
-                        city: capital,
+                        city: capital.replace(/<br>/g, ''), // Strip out any <br> tags
                         country: name, // Using the state name for the 'country' field
                         lat: parseFloat(lat),
                         lon: parseFloat(lon)
@@ -145,6 +152,10 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Could not fetch US state capitals:', error);
             return [];
         }
+    }
+
+    function getCityId(capital) {
+        return `${capital.city}-${capital.country}`;
     }
 
     /**
@@ -164,6 +175,7 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log('European Capitals Loaded:', europeanCapitalsData.length);
 
         // Re-enable buttons now that the data is ready
+        loadCityScores(); // Load scores from localStorage
         difficultyButtons.forEach(btn => btn.disabled = false);
     }
 
@@ -171,10 +183,12 @@ document.addEventListener('DOMContentLoaded', () => {
      * Starts the game with a selected number of rounds.
      */
     function startGame(rounds, difficulty) {
-        totalRounds = rounds;
+        isEndlessMode = (rounds === 'endless'); // Set endless mode flag
+        totalRounds = isEndlessMode ? Infinity : rounds; // Set totalRounds to Infinity for endless mode
         currentRound = 0;
         totalScore = 0;
         selectedDifficulty = difficulty;
+        quitGameBtn.style.display = 'none'; // Hide quit button initially
 
         // Select the capital pool based on difficulty
         switch (selectedDifficulty) {
@@ -208,9 +222,41 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Tell Leaflet to update its size now that the container is visible, and recenter
         map.invalidateSize(); // Ensure map tiles render correctly
-        map.setView([20, 0], 2); // Reset map view for new game
+        map.setView([20, 0], 2); // Reset map view for new game start
 
         startNewRound();
+    }
+
+    /**
+     * Loads city scores from localStorage.
+     */
+    function loadCityScores() {
+        try {
+            const storedScores = localStorage.getItem('capitalQuizScores');
+            if (storedScores) {
+                cityScores = JSON.parse(storedScores);
+                console.log('Loaded city scores:', cityScores);
+            }
+        } catch (e) {
+            console.error('Error loading city scores from localStorage:', e);
+            cityScores = {}; // Reset if corrupted
+        }
+    }
+
+    /**
+     * Saves the best score for a city to localStorage.
+     * @param {object} capital - The capital object.
+     * @param {number} score - The score achieved in the round.
+     */
+    function saveCityScore(capital, score) {
+        const cityId = getCityId(capital);
+        const currentBestScore = cityScores[cityId] || 0;
+
+        cityScores[cityId] = score;
+        localStorage.setItem('capitalQuizScores', JSON.stringify(cityScores));
+        console.log(`Updated score for ${cityId}: ${score}`);
+        
+        //console.log('Current cityScores:', cityScores);
     }
 
     /**
@@ -250,6 +296,7 @@ document.addEventListener('DOMContentLoaded', () => {
         currentRound++;
         totalRoundsEl.textContent = totalRounds;
         currentRoundEl.textContent = currentRound;
+        if (isEndlessMode) totalRoundsEl.textContent = '∞'; // Display infinity for endless mode
         totalScoreEl.textContent = totalScore;
 
         // 1. Reset UI and map layers
@@ -257,30 +304,69 @@ document.addEventListener('DOMContentLoaded', () => {
         nextRoundBtn.style.display = 'none';
         if (guessMarker) map.removeLayer(guessMarker);
         if (answerMarker) map.removeLayer(answerMarker);
-        if (answerLine) map.removeLayer(answerLine);
+        if (answerLine) map.removeLayer(answerLine); 
+        // map.setView([20, 0], 2); // Removed per user request to not reset view each round
 
-        // Reset map view if needed
-        //map.setView([20, 0], 2); // Ensure map is centered and zoomed out for each new round
+        // Determine the lists of never-played and weighted capitals.
+        const playedCapitalsWithScores = [];
+        gameNeverPlayedCapitals = [];
+        gameWeightedPlayedCapitals = [];
 
-        // 2. Pick a new random capital from the available list to avoid repeats
-        if (availableCapitals.length === 0) {
-            // If we run out of unique capitals, reset the list from the current difficulty pool
-            availableCapitals = [...currentCapitalPool];
+        // Separate the available pool into two groups
+        availableCapitals.filter(c => !recentlyChosenCapitals.some(rc => getCityId(rc) === getCityId(c))).forEach(capital => {
+            const cityId = getCityId(capital);
+            if (cityScores[cityId] === undefined) {
+                gameNeverPlayedCapitals.push(capital);
+            } else {
+                const bestScore = cityScores[cityId];
+                const weight = Math.max(1, 100 - bestScore); // Score 0 gets weight 100, score 99 gets weight 1. Max 1 to ensure all are pickable.
+                for (let i = 0; i < weight; i++) {
+                    gameWeightedPlayedCapitals.push(capital);
+                }
+            }
+        });
+        console.log('Never played capitals:', gameNeverPlayedCapitals);
+        console.log('Weighted played capitals:', gameWeightedPlayedCapitals);
+
+        // 2. Pick a capital for this round, prioritizing from the never-played list
+        if (gameNeverPlayedCapitals.length > 0) {
+            // Prioritize cities never played before
+            const randomIndex = Math.floor(Math.random() * gameNeverPlayedCapitals.length);
+            currentCapital = gameNeverPlayedCapitals.splice(randomIndex, 1)[0];
+            console.log("Got new capital from never-played list:", currentCapital.city, ' ', currentCapital.country);
+        } else if (gameWeightedPlayedCapitals.length > 0) {
+            // If no unplayed cities are left, pick from the weighted list
+            const randomIndex = Math.floor(Math.random() * gameWeightedPlayedCapitals.length);
+            currentCapital = gameWeightedPlayedCapitals[randomIndex]; // Just pick, don't splice yet
+            console.log("Got new capital from weighted list:", currentCapital.city, ' ', currentCapital.country);
+            // Remove all instances of the chosen capital to prevent it from being picked again
+            gameWeightedPlayedCapitals = gameWeightedPlayedCapitals.filter(c => getCityId(c) !== getCityId(currentCapital));
+        } else {
+            // Fallback: if both lists are exhausted, pick randomly from the original pool
+            currentCapital = currentCapitalPool[Math.floor(Math.random() * currentCapitalPool.length)];
         }
-        const capitalIndex = Math.floor(Math.random() * availableCapitals.length);
-        currentCapital = availableCapitals.splice(capitalIndex, 1)[0]; // Pick and remove from list
+
+        // Manage the recently chosen list
+        // Add the new capital to the front
+        recentlyChosenCapitals.unshift(currentCapital);
+        // If the list is over the limit, remove the oldest item from the end
+        if (recentlyChosenCapitals.length > RECENT_CAPITALS_LIMIT) {
+            recentlyChosenCapitals.pop();
+        }
+        console.log('Recently chosen capitals:', recentlyChosenCapitals);
 
         questionEl.textContent = `Where is ${currentCapital.city}, ${currentCapital.country}?`;
 
         // 3. Enable map clicking
+        if (isEndlessMode) quitGameBtn.style.display = 'block'; // Show quit button in endless mode
         mapClickHandler = map.on('click', handleMapClick);
     }
 
     /**
      * Ends the game and displays the final score.
      */
-    function endGame() {
-        const maxPossibleScore = totalRounds * 100;
+    function endGame(quitEarly = false) {
+        const maxPossibleScore = isEndlessMode ? (currentRound * 100) : (totalRounds * 100);
         mapContainer.style.display = 'none';
         uiContainer.style.display = 'none';
         gameOverContainer.style.display = 'block';
@@ -310,14 +396,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const distance = getDistance(guessLat, guessLon, answerLat, answerLon);
         const score = calculateScore(distance);
         totalScore += score;
+        saveCityScore(currentCapital, score); // Save the score for the current city
 
         // Display results
         resultEl.innerHTML = `You were <b>${distance.toFixed(0)} km</b> away. Your score is <b>${score}/100</b>.`;
         totalScoreEl.textContent = totalScore; // Update total score display
         nextRoundBtn.style.display = 'block';
 
-        // Change button text for the last round
-        if (currentRound >= totalRounds) {
+        // Change button text for the last round or in endless mode
+        if (isEndlessMode) {
+            nextRoundBtn.textContent = 'Next Round';
+        } else if (currentRound >= totalRounds) {
             nextRoundBtn.textContent = 'Finish Game';
         } else {
             nextRoundBtn.textContent = 'Next Round';
@@ -344,7 +433,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     roundButtons.forEach(button => {
         button.addEventListener('click', (e) => {
-            selectedRounds = parseInt(e.target.getAttribute('data-rounds'), 10);
+            selectedRounds = e.target.getAttribute('data-rounds'); // Get as string
+            if (selectedRounds !== 'endless') selectedRounds = parseInt(selectedRounds, 10); // Parse to int if not endless
             roundButtons.forEach(btn => btn.classList.remove('selected'));
             e.target.classList.add('selected');
             startGameBtn.disabled = false; // Enable the start button
@@ -358,10 +448,16 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     nextRoundBtn.addEventListener('click', () => {
-        if (currentRound < totalRounds) {
+        if (isEndlessMode || currentRound < totalRounds) {
             startNewRound();
         } else {
             endGame();
+        }
+    });
+
+    quitGameBtn.addEventListener('click', () => {
+        if (isEndlessMode) {
+            endGame(true); // Call endGame with a flag indicating early quit
         }
     });
 
@@ -374,6 +470,9 @@ document.addEventListener('DOMContentLoaded', () => {
         startGameBtn.disabled = true;
         difficultyButtons.forEach(btn => btn.classList.remove('selected'));
         roundButtons.forEach(btn => btn.classList.remove('selected'));
+        quitGameBtn.style.display = 'none'; // Ensure quit button is hidden
+        startGameBtn.disabled = true; // Disable start button until new selection
+        isEndlessMode = false; // Reset endless mode state
         selectedDifficulty = null;
         selectedRounds = null;
     });
