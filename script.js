@@ -249,14 +249,24 @@ document.addEventListener('DOMContentLoaded', () => {
      * @param {number} score - The score achieved in the round.
      */
     function saveCityScore(capital, score) {
+        const CORRECT_SCORE_THRESHOLD = 98;
         const cityId = getCityId(capital);
-        const currentBestScore = cityScores[cityId] || 0;
-
-        cityScores[cityId] = score;
-        localStorage.setItem('capitalQuizScores', JSON.stringify(cityScores));
-        console.log(`Updated score for ${cityId}: ${score}`);
         
-        //console.log('Current cityScores:', cityScores);
+        // Get existing data or create a new entry
+        const cityData = { score: 0, streak: (cityScores[cityId].streak || 0)};
+
+        // Update score
+        cityData.score = score;
+
+        // Update streak based on performance
+        if (score >= CORRECT_SCORE_THRESHOLD) {
+            cityData.streak = Math.max(1, cityData.streak + 2); // Increment streak, ensuring it's at least 1 for a correct answer.
+        } else {
+            cityData.streak = -2; // Set a negative streak for a wrong answer to heavily prioritize it.
+        }
+        cityScores[cityId] = cityData;
+        localStorage.setItem('capitalQuizScores', JSON.stringify(cityScores));
+        console.log(`Updated data for ${cityId}:`, cityData);
     }
 
     /**
@@ -307,40 +317,40 @@ document.addEventListener('DOMContentLoaded', () => {
         if (answerLine) map.removeLayer(answerLine); 
         // map.setView([20, 0], 2); // Removed per user request to not reset view each round
 
-        // Determine the lists of never-played and weighted capitals.
-        const playedCapitalsWithScores = [];
-        gameNeverPlayedCapitals = [];
         gameWeightedPlayedCapitals = [];
+
+        // First, find the maximum positive streak across all scored cities.
+        const maxStreak = Object.values(cityScores).reduce((max, city) => {
+            return city.streak > max ? city.streak : max;
+        }, 0);
+        console.log("Current Max Streak:", maxStreak);
 
         // Separate the available pool into two groups
         availableCapitals.filter(c => !recentlyChosenCapitals.some(rc => getCityId(rc) === getCityId(c))).forEach(capital => {
             const cityId = getCityId(capital);
-            if (cityScores[cityId] === undefined) {
-                gameNeverPlayedCapitals.push(capital);
+
+            const cityData = cityScores[cityId];
+            const streak = cityData.streak || 0;
+            
+            let weight;
+
+            if (streak < 0) {
+                weight = 400; // Keep a very high fixed weight for incorrect answers.
             } else {
-                const bestScore = cityScores[cityId];
-                const weight = Math.max(1, 100 - bestScore); // Score 0 gets weight 100, score 99 gets weight 1. Max 1 to ensure all are pickable.
-                for (let i = 0; i < weight; i++) {
-                    gameWeightedPlayedCapitals.push(capital);
-                }
+                // Weight is exponentially higher for streaks further from the max streak.
+                weight = Math.max(1, Math.round(Math.pow(2.5, maxStreak - streak)));
+            }
+            for (let i = 0; i < weight; i++) {
+                gameWeightedPlayedCapitals.push(capital);
             }
         });
         console.log('Never played capitals:', gameNeverPlayedCapitals);
         console.log('Weighted played capitals:', gameWeightedPlayedCapitals);
-
-        // 2. Pick a capital for this round, prioritizing from the never-played list
-        if (gameNeverPlayedCapitals.length > 0) {
-            // Prioritize cities never played before
-            const randomIndex = Math.floor(Math.random() * gameNeverPlayedCapitals.length);
-            currentCapital = gameNeverPlayedCapitals.splice(randomIndex, 1)[0];
-            console.log("Got new capital from never-played list:", currentCapital.city, ' ', currentCapital.country);
-        } else if (gameWeightedPlayedCapitals.length > 0) {
-            // If no unplayed cities are left, pick from the weighted list
+      
+        if (gameWeightedPlayedCapitals.length > 0) {
             const randomIndex = Math.floor(Math.random() * gameWeightedPlayedCapitals.length);
             currentCapital = gameWeightedPlayedCapitals[randomIndex]; // Just pick, don't splice yet
             console.log("Got new capital from weighted list:", currentCapital.city, ' ', currentCapital.country);
-            // Remove all instances of the chosen capital to prevent it from being picked again
-            gameWeightedPlayedCapitals = gameWeightedPlayedCapitals.filter(c => getCityId(c) !== getCityId(currentCapital));
         } else {
             // Fallback: if both lists are exhausted, pick randomly from the original pool
             currentCapital = currentCapitalPool[Math.floor(Math.random() * currentCapitalPool.length)];
