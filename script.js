@@ -22,10 +22,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Map Initialization ---
     const map = L.map('map', {
         center: [20, 0],
-        zoom: 2,
-        minZoom: 4, // DO NOT CHANGE THESE
-        maxZoom: 8, // DO NOT CHANGE THESE
-        // The maxBounds option has been removed to allow horizontal wrapping.
+        zoom: 3,
+        minZoom: 3, 
+        maxZoom: 8, 
     });
 
     // Switched to a satellite tile layer with no labels
@@ -85,6 +84,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     lon: country.capitalInfo.latlng[1]  // Longitude
                 }));
             console.log(`Transformed capitals for region '${region}':`, transformedData);
+
+            // Data patch for "El Aaiún" which has reversed lat/lon from the API
+            const elAaiun = transformedData.find(c => c.city === 'El Aaiún');
+            if (elAaiun) {
+                const tempLat = elAaiun.lat;
+                elAaiun.lat = elAaiun.lon;
+                elAaiun.lon = tempLat;
+            }
+            
             return transformedData;
         } catch (error) {
             console.error(`Could not fetch capitals for region '${region}':`, error);
@@ -259,7 +267,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Tell Leaflet to update its size now that the container is visible, and recenter
         map.invalidateSize(); // Ensure map tiles render correctly
-        map.setView([20, 0], 2); // Reset map view for new game start
+        map.setView([20, 0], 3); // Reset map view for new game start
 
         startGameBtn.disabled = false;
         startGameBtn.textContent = 'Start Game';
@@ -450,8 +458,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Show markers and line on the map
-        guessMarker = L.marker([guessLat, guessLon]).addTo(map).bindPopup("Your Guess").openPopup();
-        answerMarker = L.marker([answerLat, answerLon]).addTo(map).bindPopup(`The answer: ${currentCapital.city}`).openPopup();
+        guessMarker = L.marker([guessLat, guessLon], { opacity: 0.6 }).addTo(map);
+        answerMarker = L.marker([answerLat, answerLon]).addTo(map).bindPopup(`Actual Location`).openPopup();
         answerLine = L.polyline([[guessLat, guessLon], [answerLat, answerLon]], { color: 'red' }).addTo(map);
 
         // Fit map to show both points
