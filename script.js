@@ -153,25 +153,40 @@ function generateObjectDistribution(itemsWithStreaks) {
         }
         return weightedArray;
     }
+    const targetLength = 20 * numItems;
 
-    // 3. Calculate the total "rank weight" sum. A lower streak gets a higher rank.
-    let totalRankWeight = 0;
-    for (let i = 0; i < numUniqueStreaks; i++) {
-        const streakValue = sortedUniqueStreaks[i];
-        const numItemsWithThisStreak = streakCounts.get(streakValue);
-        const rank = numUniqueStreaks - 1 - i; // Highest rank for the lowest streak
-        totalRankWeight += numItemsWithThisStreak * rank;
+    // 3. Helper function to test how long the array would be with a given base
+    function calculateTotalWithBase(b) {
+        let total = 0;
+        for (let i = 0; i < numUniqueStreaks; i++) {
+            const countInOriginal = streakCounts.get(sortedUniqueStreaks[i]);
+            const power = numUniqueStreaks - 1 - i;
+            total += countInOriginal * Math.pow(b, power);
+        }
+        return total;
     }
 
-    // 4. Calculate a scaling factor to make the final array size proportional to the number of items.
-    const scalingFactor = (19 * numItems) / totalRankWeight;
+    // 4. Binary search to find the perfect exponential base
+    let low = 1.0;
+    let high = targetLength; // The base will never be higher than the target length
+    let base = 2.0;
+
+    // 40 iterations is more than enough for extreme precision
+    for (let iter = 0; iter < 40; iter++) {
+        base = (low + high) / 2;
+        if (calculateTotalWithBase(base) > targetLength) {
+            high = base; // Guess was too high
+        } else {
+            low = base;  // Guess was too low
+        }
+    }
 
     // 5. Pre-calculate the number of copies for each unique streak value.
     const copiesPerStreak = new Map();
     for (let i = 0; i < numUniqueStreaks; i++) {
         const streakValue = sortedUniqueStreaks[i];
-        const rank = numUniqueStreaks - 1 - i;
-        const numCopies = Math.round(1 + scalingFactor * rank);
+        const power = numUniqueStreaks - 1 - i;
+        const numCopies = Math.round(Math.pow(base, power));
         copiesPerStreak.set(streakValue, numCopies);
     }
 
@@ -193,6 +208,8 @@ function generateObjectDistribution(itemsWithStreaks) {
        
         debugArray.push({streak, copies, cityname, countryname});
     }
+    // Sort the debug array by the number of copies in descending order for easier analysis
+    debugArray.sort((a, b) => b.copies - a.copies);
     console.log("Debug array:", debugArray);
     return weightedArray;
 }
@@ -386,7 +403,6 @@ function generateObjectDistribution(itemsWithStreaks) {
         if (recentlyChosenCapitals.length > RECENT_CAPITALS_LIMIT) {
             recentlyChosenCapitals.pop();
         }
-        console.log('Recently chosen capitals:', recentlyChosenCapitals);
 
         questionEl.textContent = `Where is ${currentCapital.city}, ${currentCapital.country}?`;
 
