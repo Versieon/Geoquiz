@@ -49,11 +49,11 @@ document.addEventListener('DOMContentLoaded', () => {
     let selectedGrouping = null;
 
     let currentCapitalPool = []; // The pool of capitals for the current game
-    let gameWeightedPlayedCapitals = []; // Weighted list of previously played capitals for the current game
-    const RECENT_CAPITALS_LIMIT = 5; // How many recent capitals to avoid picking
+    let WeightedCapitals = []; // Weighted list of previously played capitals for the current game
+    const RECENT_CAPITALS_LIMIT = 2; // How many recent capitals to avoid picking
     let recentlyChosenCapitals = []; // Stores the last N chosen capitals
     let cityScores = {}; // Stores best scores for each city: { "city-country": bestScore }
-
+    let minstreak = 0;
     // --- Functions ---
 
     /**
@@ -62,8 +62,8 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {Promise<Array>} A promise that resolves to an array of capital objects.
      */
     async function fetchCountryCapitals(region) {
-        const fields = 'name,capital,capitalInfo,cca2';
-        const baseUrl = 'https://restcountries.com/v3.1/';
+        const fields = 'name,capital,capitalInfo';
+        const baseUrl = 'https://restcountries.com/v4/';
         const url = region === 'all' 
             ? `${baseUrl}all?fields=${fields}` 
             : `${baseUrl}region/${region}?fields=${fields}`;
@@ -131,89 +131,62 @@ document.addEventListener('DOMContentLoaded', () => {
         return `${capital.city}-${capital.country}`;
     }
 
-function generateObjectDistribution(itemsWithStreaks) {
-    const numItems = itemsWithStreaks.length;
-    if (numItems === 0) return [];
+    function generateSimplifiedExponential(inputList) {
+        const N = inputList.length;
+        if (N === 0) return [];
 
-    // 1. Count how many items exist for each unique streak value.
-    const streakCounts = new Map();
-    for (const item of itemsWithStreaks) {
-        streakCounts.set(item.value, (streakCounts.get(item.value) || 0) + 1);
-    }
-
-    // 2. Get all unique streak values and sort them from worst to best (e.g., -2, 0, 1, 5).
-    const sortedUniqueStreaks = Array.from(streakCounts.keys()).sort((a, b) => a - b);
-    const numUniqueStreaks = sortedUniqueStreaks.length;
-
-    // Edge case: If all items have the exact same streak, give them all an equal, high weight.
-    if (numUniqueStreaks === 1) {
-        const weightedArray = [];
-        for (const item of itemsWithStreaks) {
-            for (let j = 0; j < 20; j++) weightedArray.push(item.item); 
+        //Find the number of unique "tiers" and count entries in each
+        const tierCounts = new Map();
+        for (const entry of inputList) {
+            tierCounts.set(entry.value, (tierCounts.get(entry.value) || 0) + 1);
         }
-        return weightedArray;
-    }
-    const targetLength = 20 * numItems;
 
-    // 3. Helper function to test how long the array would be with a given base
-    function calculateTotalWithBase(b) {
-        let total = 0;
-        for (let i = 0; i < numUniqueStreaks; i++) {
-            const countInOriginal = streakCounts.get(sortedUniqueStreaks[i]);
-            const power = numUniqueStreaks - 1 - i;
-            total += countInOriginal * Math.pow(b, power);
+        const uniqueTiers = Array.from(tierCounts.keys()).sort((a, b) => a - b);
+        const R = uniqueTiers.length;
+
+        if (R === 1) {
+            return inputList.flatMap(entry => Array(20).fill(entry.item));
         }
-        return total;
-    }
 
-    // 4. Binary search to find the perfect exponential base
-    let low = 1.0;
-    let high = targetLength; // The base will never be higher than the target length
-    let base = 2.0;
-
-    // 40 iterations is more than enough for extreme precision
-    for (let iter = 0; iter < 40; iter++) {
-        base = (low + high) / 2;
-        if (calculateTotalWithBase(base) > targetLength) {
-            high = base; // Guess was too high
-        } else {
-            low = base;  // Guess was too low
-        }
-    }
-
-    // 5. Pre-calculate the number of copies for each unique streak value.
-    const copiesPerStreak = new Map();
-    for (let i = 0; i < numUniqueStreaks; i++) {
-        const streakValue = sortedUniqueStreaks[i];
-        const power = numUniqueStreaks - 1 - i;
-        const numCopies = Math.round(Math.pow(base, power));
-        copiesPerStreak.set(streakValue, numCopies);
-    }
-
-    const weightedArray = [];
-    const debugArray = [];
-
-    // 6. Build the final weighted array.
-    for (const item of itemsWithStreaks) {
-        const copies = copiesPerStreak.get(item.value);
+        //Fit function to that many tiers
+        const targetLength = 20 * N;
+        const highestTierCount = tierCounts.get(uniqueTiers[R - 1]);
+        minstreak = tierCounts.get(uniqueTiers[0]);
         
-        for (let j = 0; j < copies; j++) {
-            // Note: This pushes the object reference. 
-            // If you need unique clones of the object, you would use something like structuredClone(entry.item) here.
-            weightedArray.push(item.item);
-        }
-        const cityname = item.item.city;
-        const countryname = item.item.country;
-        const streak = item.value;
-       
-        debugArray.push({streak, copies, cityname, countryname});
-    }
-    // Sort the debug array by the number of copies in descending order for easier analysis
-    debugArray.sort((a, b) => b.copies - a.copies);
-    console.log("Debug array:", debugArray);
-    return weightedArray;
-}
+        const base = Math.pow(targetLength / highestTierCount, 1 / (R - 1));
 
+        const result = [];
+        const debugArray = [];
+
+        //Get totals for each tier, divide by entries, and populate
+        for (const entry of inputList) {
+            // Find which tier this item belongs to (0 is lowest value/highest tier)
+            const tierIndex = uniqueTiers.indexOf(entry.value);
+            const power = R - 1 - tierIndex; 
+            
+            // Total slots this ENTIRE tier gets
+            const tierTotalSlots = highestTierCount * Math.pow(base, power);
+            
+            // Divide by the number of entries in this tier to get the final multiplier
+            const entriesInTier = tierCounts.get(entry.value);
+            const finalMultiplier = Math.max(1, Math.round(tierTotalSlots / entriesInTier));
+
+            // Add the items to the final array
+            for (let j = 0; j < finalMultiplier; j++) {
+                result.push(entry.item);
+            }
+            const cityname = entry.item.city;
+            const countryname = entry.item.country;
+            const streak = entry.value;
+        
+            debugArray.push({streak, finalMultiplier, cityname, countryname});
+        }
+
+        debugArray.sort((a, b) => b.finalMultiplier - a.finalMultiplier);
+        console.log("Debug array:", debugArray);
+
+        return result;
+    }
     /**
      * Starts the game with a selected number of rounds.
      */
@@ -232,6 +205,18 @@ function generateObjectDistribution(itemsWithStreaks) {
                 break;
             case 'all':
                 fetchedCapitals = await fetchCountryCapitals('all');
+                break;
+            case 'africa':
+                fetchedCapitals = await fetchCountryCapitals('africa');
+                break;
+            case 'americas':
+                fetchedCapitals = await fetchCountryCapitals('americas');
+                break;
+            case 'asia':
+                fetchedCapitals = await fetchCountryCapitals('asia');
+                break;
+            case 'oceania':
+                fetchedCapitals = await fetchCountryCapitals('oceania');
                 break;
             default:
                 console.error("Invalid grouping selected:", grouping);
@@ -315,9 +300,9 @@ function generateObjectDistribution(itemsWithStreaks) {
 
         // Update streak based on performance
         if (score >= CORRECT_SCORE_THRESHOLD) {
-            cityData.streak = Math.max(1, cityData.streak + 1); // Increment streak, ensuring it's at least 1 for a correct answer.
+            cityData.streak = Math.max(1, cityData.streak + 1); 
         } else {
-            cityData.streak = -2; // Set a negative streak for a wrong answer to heavily prioritize it.
+            cityData.streak = Math.max(0, cityData.streak -2);
         }
         cityScores[cityId] = cityData;
         localStorage.setItem('capitalQuizScores', JSON.stringify(cityScores));
@@ -373,7 +358,7 @@ function generateObjectDistribution(itemsWithStreaks) {
         if (answerLine) map.removeLayer(answerLine); 
         // map.setView([20, 0], 2); // Removed per user request to not reset view each round
 
-        gameWeightedPlayedCapitals = [];
+        WeightedCapitals = [];
 
         const potentialPicks = availableCapitals.filter(c => !recentlyChosenCapitals.some(rc => getCityId(rc) === getCityId(c)));
         
@@ -383,13 +368,14 @@ function generateObjectDistribution(itemsWithStreaks) {
             return { item, value };
         });
 
-        gameWeightedPlayedCapitals = generateObjectDistribution(picksWithWeights);
+        //WeightedCapitals = generateObjectDistribution(picksWithWeights);
+        WeightedCapitals = generateSimplifiedExponential(picksWithWeights);
 
-        console.log('Weighted played capitals:', gameWeightedPlayedCapitals);
+        console.log('Weighted played capitals:', WeightedCapitals);
       
-        if (gameWeightedPlayedCapitals.length > 0) {
-            const randomIndex = Math.floor(Math.random() * gameWeightedPlayedCapitals.length);
-            currentCapital = gameWeightedPlayedCapitals[randomIndex]; // Just pick, don't splice yet
+        if (WeightedCapitals.length > 0) {
+            const randomIndex = Math.floor(Math.random() * WeightedCapitals.length);
+            currentCapital = WeightedCapitals[randomIndex]; // Just pick, don't splice yet
             console.log("Got new capital from weighted list:", currentCapital.city, ' ', currentCapital.country);
         } else {
             // Fallback: if both lists are exhausted, pick randomly from the original pool
