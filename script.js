@@ -2,7 +2,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- DOM Elements ---
     const setupContainer = document.getElementById('setup-container');
     const roundButtons = document.querySelectorAll('.round-btn');
-    const difficultyButtons = document.querySelectorAll('.difficulty-btn');
+    const groupingButtons = document.querySelectorAll('.grouping-btn');
     const roundsSelection = document.getElementById('rounds-selection');
     const startGameBtn = document.getElementById('start-game-btn');
     const mapContainer = document.getElementById('map');
@@ -45,76 +45,49 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentRound = 0;
     let totalScore = 0;
     let availableCapitals = [];
-    let isEndlessMode = false; // Flag for endless mode
-    let selectedDifficulty = null;
+    let isEndlessMode = false;
+    let selectedGrouping = null;
 
-    // --- Data Storage for different difficulties ---
-    let worldCapitalsData = [];
-    let usStateCapitalsData = [];
-    let europeanCapitalsData = [];
     let currentCapitalPool = []; // The pool of capitals for the current game
-    let gameNeverPlayedCapitals = []; // Capitals for the current game that have never been played
     let gameWeightedPlayedCapitals = []; // Weighted list of previously played capitals for the current game
-    const RECENT_CAPITALS_LIMIT = 10; // How many recent capitals to avoid picking
+    const RECENT_CAPITALS_LIMIT = 5; // How many recent capitals to avoid picking
     let recentlyChosenCapitals = []; // Stores the last N chosen capitals
     let cityScores = {}; // Stores best scores for each city: { "city-country": bestScore }
 
     // --- Functions ---
 
     /**
-     * Fetches and transforms world capital data from the REST Countries API.
-     * @returns {Promise<Array>} A promise that resolves to an array of world capital objects.
+     * Fetches and transforms capital data from the REST Countries API for a specific region.
+     * @param {string} region - The region to fetch (e.g., 'europe') or 'all' for the whole world.
+     * @returns {Promise<Array>} A promise that resolves to an array of capital objects.
      */
-    async function fetchWorldCapitals() {
-        try {
-            const response = await fetch('https://restcountries.com/v3.1/all?fields=name,capital,capitalInfo,cca2');
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            const data = await response.json();
-            console.log('Fetched raw world capitals:', data);
-            // Transform the data into the format our game expects
-            const transformedData = data
-                .filter(country => country.capital && country.capital.length > 0 && country.capitalInfo && country.capitalInfo.latlng)
-                .map(country => ({
-                    city: country.capital[0],
-                    country: country.name.common,
-                    lat: country.capitalInfo.latlng[0],
-                    lon: country.capitalInfo.latlng[1]
-                }));
-            console.log('Transformed world capitals:', transformedData);
-            return transformedData;
-        } catch (error) {
-            console.error('Could not fetch world capitals:', error);
-            return []; // Return empty array on error
-        }
-    }
+    async function fetchCountryCapitals(region) {
+        const fields = 'name,capital,capitalInfo,cca2';
+        const baseUrl = 'https://restcountries.com/v3.1/';
+        const url = region === 'all' 
+            ? `${baseUrl}all?fields=${fields}` 
+            : `${baseUrl}region/${region}?fields=${fields}`;
 
-    /**
-     * Fetches and transforms European capital data from the REST Countries API.
-     * @returns {Promise<Array>} A promise that resolves to an array of European capital objects.
-     */
-    async function fetchEuropeanCapitals() {
         try {
-            const response = await fetch('https://restcountries.com/v3.1/region/europe?fields=name,capital,capitalInfo,cca2');
+            const response = await fetch(url);
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             const data = await response.json();
-            console.log('Fetched raw European capitals:', data);
+            console.log(`Fetched raw capitals for region '${region}':`, data);
             // Transform the data into the format our game expects
             const transformedData = data
                 .filter(country => country.capital && country.capital.length > 0 && country.capitalInfo && country.capitalInfo.latlng)
                 .map(country => ({
                     city: country.capital[0],
                     country: country.name.common,
-                    lat: country.capitalInfo.latlng[0],
-                    lon: country.capitalInfo.latlng[1]
+                    lat: country.capitalInfo.latlng[0], // Latitude
+                    lon: country.capitalInfo.latlng[1]  // Longitude
                 }));
-            console.log('Transformed European capitals:', transformedData);
+            console.log(`Transformed capitals for region '${region}':`, transformedData);
             return transformedData;
         } catch (error) {
-            console.error('Could not fetch European capitals:', error);
+            console.error(`Could not fetch capitals for region '${region}':`, error);
             return []; // Return empty array on error
         }
     }
@@ -138,7 +111,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const transformedData = lines
                 .slice(1) // Skip the header row
                 .map(line => {
-                    const [name, capital, lat, lon] = line.split(','); // THIS IS THE CORRECT FORMAT, DO NOT CHANGE
+                    const [name, capital, lat, lon] = line.split(','); 
                     return {
                         city: capital.replace(/<br>/g, ''), // Strip out any <br> tags
                         country: name, // Using the state name for the 'country' field
@@ -158,53 +131,114 @@ document.addEventListener('DOMContentLoaded', () => {
         return `${capital.city}-${capital.country}`;
     }
 
-    /**
-     * Initializes the game by fetching all necessary capital data.
-     */
-    async function initializeGameData() {
-        // Disable buttons while data is loading to prevent a race condition
-        difficultyButtons.forEach(btn => btn.disabled = true);
+function generateObjectDistribution(itemsWithStreaks) {
+    const numItems = itemsWithStreaks.length;
+    if (numItems === 0) return [];
 
-        [worldCapitalsData, usStateCapitalsData, europeanCapitalsData] = await Promise.all([
-            fetchWorldCapitals(),
-            fetchUsStateCapitals(),
-            fetchEuropeanCapitals()
-        ]);
-        console.log('World Capitals Loaded:', worldCapitalsData.length);
-        console.log('US State Capitals Loaded:', usStateCapitalsData.length);
-        console.log('European Capitals Loaded:', europeanCapitalsData.length);
-
-        // Re-enable buttons now that the data is ready
-        loadCityScores(); // Load scores from localStorage
-        difficultyButtons.forEach(btn => btn.disabled = false);
+    // 1. Count how many items exist for each unique streak value.
+    const streakCounts = new Map();
+    for (const item of itemsWithStreaks) {
+        streakCounts.set(item.value, (streakCounts.get(item.value) || 0) + 1);
     }
+
+    // 2. Get all unique streak values and sort them from worst to best (e.g., -2, 0, 1, 5).
+    const sortedUniqueStreaks = Array.from(streakCounts.keys()).sort((a, b) => a - b);
+    const numUniqueStreaks = sortedUniqueStreaks.length;
+
+    // Edge case: If all items have the exact same streak, give them all an equal, high weight.
+    if (numUniqueStreaks === 1) {
+        const weightedArray = [];
+        for (const item of itemsWithStreaks) {
+            for (let j = 0; j < 20; j++) weightedArray.push(item.item); 
+        }
+        return weightedArray;
+    }
+
+    // 3. Calculate the total "rank weight" sum. A lower streak gets a higher rank.
+    let totalRankWeight = 0;
+    for (let i = 0; i < numUniqueStreaks; i++) {
+        const streakValue = sortedUniqueStreaks[i];
+        const numItemsWithThisStreak = streakCounts.get(streakValue);
+        const rank = numUniqueStreaks - 1 - i; // Highest rank for the lowest streak
+        totalRankWeight += numItemsWithThisStreak * rank;
+    }
+
+    // 4. Calculate a scaling factor to make the final array size proportional to the number of items.
+    const scalingFactor = (19 * numItems) / totalRankWeight;
+
+    // 5. Pre-calculate the number of copies for each unique streak value.
+    const copiesPerStreak = new Map();
+    for (let i = 0; i < numUniqueStreaks; i++) {
+        const streakValue = sortedUniqueStreaks[i];
+        const rank = numUniqueStreaks - 1 - i;
+        const numCopies = Math.round(1 + scalingFactor * rank);
+        copiesPerStreak.set(streakValue, numCopies);
+    }
+
+    const weightedArray = [];
+    const debugArray = [];
+
+    // 6. Build the final weighted array.
+    for (const item of itemsWithStreaks) {
+        const copies = copiesPerStreak.get(item.value);
+        
+        for (let j = 0; j < copies; j++) {
+            // Note: This pushes the object reference. 
+            // If you need unique clones of the object, you would use something like structuredClone(entry.item) here.
+            weightedArray.push(item.item);
+        }
+        const cityname = item.item.city;
+        const countryname = item.item.country;
+        const streak = item.value;
+       
+        debugArray.push({streak, copies, cityname, countryname});
+    }
+    console.log("Debug array:", debugArray);
+    return weightedArray;
+}
 
     /**
      * Starts the game with a selected number of rounds.
      */
-    function startGame(rounds, difficulty) {
+    async function startGame(rounds, grouping) {
+        startGameBtn.disabled = true;
+        startGameBtn.textContent = 'Loading...';
+
+        // 1. Fetch data on-demand based on the selected grouping
+        let fetchedCapitals = [];
+        switch (grouping) {
+            case 'usstates':
+                fetchedCapitals = await fetchUsStateCapitals();
+                break;
+            case 'europe':
+                fetchedCapitals = await fetchCountryCapitals('europe');
+                break;
+            case 'all':
+                fetchedCapitals = await fetchCountryCapitals('all');
+                break;
+            default:
+                console.error("Invalid grouping selected:", grouping);
+                startGameBtn.disabled = false;
+                startGameBtn.textContent = 'Start Game';
+                return;
+        }
+
+        if (fetchedCapitals.length === 0) {
+            alert("Could not load capital data for this grouping. Please try again.");
+            startGameBtn.disabled = false;
+            startGameBtn.textContent = 'Start Game';
+            return;
+        }
+
+        // 2. Set up game state
         isEndlessMode = (rounds === 'endless'); // Set endless mode flag
         totalRounds = isEndlessMode ? Infinity : rounds; // Set totalRounds to Infinity for endless mode
         currentRound = 0;
         totalScore = 0;
-        selectedDifficulty = difficulty;
+        selectedGrouping = grouping;
         quitGameBtn.style.display = 'none'; // Hide quit button initially
-
-        // Select the capital pool based on difficulty
-        switch (selectedDifficulty) {
-            case 'easy':
-                currentCapitalPool = [...usStateCapitalsData];
-                break;
-            case 'medium':
-                currentCapitalPool = [...europeanCapitalsData];
-                break;
-            case 'hard':
-                currentCapitalPool = [...worldCapitalsData];
-                break;
-            default:
-                currentCapitalPool = [...worldCapitalsData];
-        }
-        availableCapitals = [...currentCapitalPool]; // Create a fresh copy for the game rounds
+        currentCapitalPool = [...fetchedCapitals];
+        availableCapitals = [...fetchedCapitals];
 
         if (availableCapitals.length === 0) {
             alert("No capital data loaded for this difficulty. Please try again later.");
@@ -215,6 +249,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        // 3. Transition to the game view
         setupContainer.style.display = 'none';
         gameOverContainer.style.display = 'none';
         mapContainer.style.display = 'block';
@@ -223,6 +258,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // Tell Leaflet to update its size now that the container is visible, and recenter
         map.invalidateSize(); // Ensure map tiles render correctly
         map.setView([20, 0], 2); // Reset map view for new game start
+
+        startGameBtn.disabled = false;
+        startGameBtn.textContent = 'Start Game';
 
         startNewRound();
     }
@@ -251,16 +289,16 @@ document.addEventListener('DOMContentLoaded', () => {
     function saveCityScore(capital, score) {
         const CORRECT_SCORE_THRESHOLD = 98;
         const cityId = getCityId(capital);
-        
+        const streak = cityScores[cityId]?.streak || 0;
         // Get existing data or create a new entry
-        const cityData = { score: 0, streak: (cityScores[cityId].streak || 0)};
+        const cityData = { score: 0, streak: streak};
 
-        // Update score
+        // Update score.
         cityData.score = score;
 
         // Update streak based on performance
         if (score >= CORRECT_SCORE_THRESHOLD) {
-            cityData.streak = Math.max(1, cityData.streak + 2); // Increment streak, ensuring it's at least 1 for a correct answer.
+            cityData.streak = Math.max(1, cityData.streak + 1); // Increment streak, ensuring it's at least 1 for a correct answer.
         } else {
             cityData.streak = -2; // Set a negative streak for a wrong answer to heavily prioritize it.
         }
@@ -312,6 +350,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // 1. Reset UI and map layers
         resultEl.innerHTML = '';
         nextRoundBtn.style.display = 'none';
+        quitGameBtn.style.display = 'none'; // Ensure quit button is hidden at the start of a round
         if (guessMarker) map.removeLayer(guessMarker);
         if (answerMarker) map.removeLayer(answerMarker);
         if (answerLine) map.removeLayer(answerLine); 
@@ -319,32 +358,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
         gameWeightedPlayedCapitals = [];
 
-        // First, find the maximum positive streak across all scored cities.
-        const maxStreak = Object.values(cityScores).reduce((max, city) => {
-            return city.streak > max ? city.streak : max;
-        }, 0);
-        console.log("Current Max Streak:", maxStreak);
-
-        // Separate the available pool into two groups
-        availableCapitals.filter(c => !recentlyChosenCapitals.some(rc => getCityId(rc) === getCityId(c))).forEach(capital => {
-            const cityId = getCityId(capital);
-
-            const cityData = cityScores[cityId];
-            const streak = cityData.streak || 0;
-            
-            let weight;
-
-            if (streak < 0) {
-                weight = 400; // Keep a very high fixed weight for incorrect answers.
-            } else {
-                // Weight is exponentially higher for streaks further from the max streak.
-                weight = Math.max(1, Math.round(Math.pow(2.5, maxStreak - streak)));
-            }
-            for (let i = 0; i < weight; i++) {
-                gameWeightedPlayedCapitals.push(capital);
-            }
+        const potentialPicks = availableCapitals.filter(c => !recentlyChosenCapitals.some(rc => getCityId(rc) === getCityId(c)));
+        
+        const picksWithWeights = potentialPicks.map(item => {
+            const cityId = getCityId(item);
+            const value = cityScores[cityId]?.streak || 0;                      
+            return { item, value };
         });
-        console.log('Never played capitals:', gameNeverPlayedCapitals);
+
+        gameWeightedPlayedCapitals = generateObjectDistribution(picksWithWeights);
+
         console.log('Weighted played capitals:', gameWeightedPlayedCapitals);
       
         if (gameWeightedPlayedCapitals.length > 0) {
@@ -368,7 +391,6 @@ document.addEventListener('DOMContentLoaded', () => {
         questionEl.textContent = `Where is ${currentCapital.city}, ${currentCapital.country}?`;
 
         // 3. Enable map clicking
-        if (isEndlessMode) quitGameBtn.style.display = 'block'; // Show quit button in endless mode
         mapClickHandler = map.on('click', handleMapClick);
     }
 
@@ -407,11 +429,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const score = calculateScore(distance);
         totalScore += score;
         saveCityScore(currentCapital, score); // Save the score for the current city
-
+        const streak = cityScores[getCityId(currentCapital)]?.streak || 0;
         // Display results
-        resultEl.innerHTML = `You were <b>${distance.toFixed(0)} km</b> away. Your score is <b>${score}/100</b>.`;
+        resultEl.innerHTML = `You were <b>${distance.toFixed(0)} km</b> away. Your score is <b>${score}/100</b>. Streak: <b>${streak}</b>`;
         totalScoreEl.textContent = totalScore; // Update total score display
         nextRoundBtn.style.display = 'block';
+        if (isEndlessMode) {
+            quitGameBtn.style.display = 'block'; // Show quit button next to next round button
+        }
 
         // Change button text for the last round or in endless mode
         if (isEndlessMode) {
@@ -432,12 +457,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Event Listeners ---
-    difficultyButtons.forEach(button => {
+    groupingButtons.forEach(button => {
         button.addEventListener('click', (e) => {
-            selectedDifficulty = e.target.getAttribute('data-difficulty');
-            difficultyButtons.forEach(btn => btn.classList.remove('selected'));
+            selectedGrouping = e.target.getAttribute('data-grouping');
+            groupingButtons.forEach(btn => btn.classList.remove('selected'));
             e.target.classList.add('selected');
-            roundsSelection.style.display = 'block'; // Show round options
+            roundsSelection.style.display = 'block';
         });
     });
 
@@ -451,9 +476,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    startGameBtn.addEventListener('click', () => {
-        if (selectedDifficulty && selectedRounds) {
-            startGame(selectedRounds, selectedDifficulty);
+    startGameBtn.addEventListener('click', async () => {
+        if (selectedGrouping && selectedRounds) {
+            await startGame(selectedRounds, selectedGrouping);
         }
     });
 
@@ -478,15 +503,16 @@ document.addEventListener('DOMContentLoaded', () => {
         // Reset selections for the next game
         roundsSelection.style.display = 'none';
         startGameBtn.disabled = true;
-        difficultyButtons.forEach(btn => btn.classList.remove('selected'));
+        groupingButtons.forEach(btn => btn.classList.remove('selected'));
         roundButtons.forEach(btn => btn.classList.remove('selected'));
         quitGameBtn.style.display = 'none'; // Ensure quit button is hidden
         startGameBtn.disabled = true; // Disable start button until new selection
         isEndlessMode = false; // Reset endless mode state
-        selectedDifficulty = null;
+        selectedGrouping = null;
         selectedRounds = null;
     });
 
-    // --- Initial Data Load ---
-    initializeGameData();
+    // --- Initial Setup ---
+    loadCityScores(); // Load any existing user scores from localStorage
+
 });

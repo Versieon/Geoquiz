@@ -13,10 +13,10 @@
 
     <div id="setup-container">
         <h1>World Capital Quiz</h1>
-        <p>Select a difficulty:</p>
-        <button class="difficulty-btn" data-difficulty="easy">Easy (US State Capitals)</button>
-        <button class="difficulty-btn" data-difficulty="medium">Medium (European Capitals)</button>
-        <button class="difficulty-btn" data-difficulty="hard">Hard (World Capitals)</button>
+        <p>Select a Grouping:</p>
+        <button class="grouping-btn" data-grouping="usstates">US State Capitals</button>
+        <button class="grouping-btn" data-grouping="europe">European Capitals</button>
+        <button class="grouping-btn" data-grouping="all">World Capitals</button>
         <hr>
         <div id="rounds-selection" style="display: none;">
             <p>Select the number of rounds to play:</p>
@@ -33,9 +33,11 @@
     <div id="ui-container" style="display: none;">
         <div id="score-tracker">Round: <span id="current-round">0</span> / <span id="total-rounds">0</span> | Score: <span id="total-score">0</span></div>
         <h2 id="question"></h2>
-        <button id="quit-game-btn" style="display: none;">Quit Game</button>
         <div id="result"></div>
-        <button id="next-round-btn" style="display: none;">Next Round</button>
+        <div id="action-buttons">
+            <button id="next-round-btn" style="display: none;">Next Round</button>
+            <button id="quit-game-btn" style="display: none;">Quit Game</button>
+        </div>
     </div>
 
     <div id="game-over-container" style="display: none;">
