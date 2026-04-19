@@ -1,7 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
     // --- DOM Elements ---
     const setupContainer = document.getElementById('setup-container');
-    const roundButtons = document.querySelectorAll('.round-btn');
     const groupingButtons = document.querySelectorAll('.grouping-btn');
     const roundsSelection = document.getElementById('rounds-selection');
     const startGameBtn = document.getElementById('start-game-btn');
@@ -203,7 +202,7 @@ document.addEventListener('DOMContentLoaded', () => {
     /**
      * Starts the game with a selected number of rounds.
      */
-    async function startGame(rounds, grouping) {
+    async function startGame(grouping) {
         startGameBtn.disabled = true;
         startGameBtn.textContent = 'Loading...';
 
@@ -268,8 +267,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // 2. Set up game state
-        isEndlessMode = (rounds === 'endless'); // Set endless mode flag
-        totalRounds = isEndlessMode ? Infinity : rounds; // Set totalRounds to Infinity for endless mode
+        isEndlessMode = true; // Always endless mode
+        totalRounds = Infinity; // Set totalRounds to Infinity for endless mode
         currentRound = 0;
         totalScore = 0;
         selectedGrouping = grouping;
@@ -499,23 +498,15 @@ document.addEventListener('DOMContentLoaded', () => {
             selectedGrouping = e.target.getAttribute('data-grouping');
             groupingButtons.forEach(btn => btn.classList.remove('selected'));
             e.target.classList.add('selected');
-            roundsSelection.style.display = 'block';
-        });
-    });
-
-    roundButtons.forEach(button => {
-        button.addEventListener('click', (e) => {
-            selectedRounds = e.target.getAttribute('data-rounds'); // Get as string
-            if (selectedRounds !== 'endless') selectedRounds = parseInt(selectedRounds, 10); // Parse to int if not endless
-            roundButtons.forEach(btn => btn.classList.remove('selected'));
-            e.target.classList.add('selected');
+            roundsSelection.style.display = 'block'; // Show the container with the start button
             startGameBtn.disabled = false; // Enable the start button
         });
     });
 
     startGameBtn.addEventListener('click', async () => {
-        if (selectedGrouping && selectedRounds) {
-            await startGame(selectedRounds, selectedGrouping);
+        if (selectedGrouping) {
+            // Always start in endless mode
+            await startGame(selectedGrouping);
         }
     });
 
@@ -541,12 +532,10 @@ document.addEventListener('DOMContentLoaded', () => {
         roundsSelection.style.display = 'none';
         startGameBtn.disabled = true;
         groupingButtons.forEach(btn => btn.classList.remove('selected'));
-        roundButtons.forEach(btn => btn.classList.remove('selected'));
         quitGameBtn.style.display = 'none'; // Ensure quit button is hidden
         startGameBtn.disabled = true; // Disable start button until new selection
         isEndlessMode = false; // Reset endless mode state
         selectedGrouping = null;
-        selectedRounds = null;
     });
 
     // --- Initial Setup ---
