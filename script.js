@@ -55,17 +55,21 @@ document.addEventListener('DOMContentLoaded', () => {
     let minstreak = 0;
     // --- Functions ---
 
-    /**
-     * Fetches and transforms capital data from the REST Countries API for a specific region.
-     * @param {string} region - The region to fetch (e.g., 'europe') or 'all' for the whole world.
-     * @returns {Promise<Array>} A promise that resolves to an array of capital objects.
-     */
-    async function fetchCountryCapitals(region) {
+    async function fetchCapitals(type, value) {
         const fields = 'name,capital,capitalInfo';
         const baseUrl = 'https://restcountries.com/v4/';
-        const url = region === 'all' 
-            ? `${baseUrl}all?fields=${fields}` 
-            : `${baseUrl}region/${region}?fields=${fields}`;
+        let endpoint = '';
+
+        if (type === 'all') {
+            endpoint = 'all';
+        } else if (type === 'region' || type === 'subregion') {
+            endpoint = `${type}/${value}`;
+        } else {
+            console.error(`Invalid fetch type: ${type}`);
+            return [];
+        }
+
+        const url = `${baseUrl}${endpoint}?fields=${fields}`;
 
         try {
             const response = await fetch(url);
@@ -73,17 +77,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             const data = await response.json();
-            console.log(`Fetched raw capitals for region '${region}':`, data);
-            // Transform the data into the format our game expects
+            console.log(`Fetched raw capitals for ${type} '${value}':`, data);
+
             const transformedData = data
-                .filter(country => country.capital && country.capital.length > 0 && country.capitalInfo && country.capitalInfo.latlng)
+                .filter(country => country.capital?.[0] && country.capitalInfo?.latlng?.length === 2)
                 .map(country => ({
                     city: country.capital[0],
                     country: country.name.common,
-                    lat: country.capitalInfo.latlng[0], // Latitude
-                    lon: country.capitalInfo.latlng[1]  // Longitude
+                    lat: country.capitalInfo.latlng[0],
+                    lon: country.capitalInfo.latlng[1]
                 }));
-            console.log(`Transformed capitals for region '${region}':`, transformedData);
+            console.log(`Transformed capitals for ${type} '${value}':`, transformedData);
 
             // Data patch for "El Aaiún" which has reversed lat/lon from the API
             const elAaiun = transformedData.find(c => c.city === 'El Aaiún');
@@ -92,10 +96,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 elAaiun.lat = elAaiun.lon;
                 elAaiun.lon = tempLat;
             }
-            
+
             return transformedData;
         } catch (error) {
-            console.error(`Could not fetch capitals for region '${region}':`, error);
+            console.error(`Could not fetch capitals for ${type} '${value}':`, error);
             return []; // Return empty array on error
         }
     }
@@ -106,7 +110,6 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     async function fetchUsStateCapitals() {
         try {
-            // Using the CSV source provided by the user.
             const response = await fetch('https://raw.githubusercontent.com/jasperdebie/VisInfo/refs/heads/master/us-state-capitals.csv');
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
@@ -114,10 +117,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const csvText = await response.text();
             console.log('Fetched raw US state capitals CSV:', csvText);
 
-            // Parse the CSV data. The format is: name,lat,lon,capital
+            // Parse the CSV data. The format is: name,capital,lat,lon
             const lines = csvText.trim().split('\n');
             const transformedData = lines
                 .slice(1) // Skip the header row
+                .filter(line => line.split(',').length === 4) // Ensure line has all 4 columns
                 .map(line => {
                     const [name, capital, lat, lon] = line.split(','); 
                     return {
@@ -126,7 +130,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         lat: parseFloat(lat),
                         lon: parseFloat(lon)
                     };
-                });
+                })
+                .filter(c => !isNaN(c.lat) && !isNaN(c.lon)); // Filter out entries with invalid lat/lon
             console.log('Transformed US state capitals:', transformedData);
             return transformedData;
         } catch (error) {
@@ -209,22 +214,44 @@ document.addEventListener('DOMContentLoaded', () => {
                 fetchedCapitals = await fetchUsStateCapitals();
                 break;
             case 'europe':
-                fetchedCapitals = await fetchCountryCapitals('europe');
+                fetchedCapitals = await fetchCapitals('region', 'europe');
                 break;
             case 'all':
-                fetchedCapitals = await fetchCountryCapitals('all');
+                fetchedCapitals = await fetchCapitals('all');
                 break;
             case 'africa':
-                fetchedCapitals = await fetchCountryCapitals('africa');
+                fetchedCapitals = await fetchCapitals('region', 'africa');
                 break;
             case 'americas':
-                fetchedCapitals = await fetchCountryCapitals('americas');
+                fetchedCapitals = await fetchCapitals('region', 'americas');
+                break;
+            case 'northamerica':
+                const northern = await fetchCapitals('subregion', 'north america');
+                const central = await fetchCapitals('subregion', 'central america');
+                fetchedCapitals = [...northern, ...central];
+                break;
+            case 'eastasia':
+                const centralasia = await fetchCapitals('subregion', 'central asia');
+                const eastasia = await fetchCapitals('subregion', 'eastern asia');
+                const southeastasia = await fetchCapitals('subregion', 'south-eastern asia');
+                fetchedCapitals = [...centralasia, ...eastasia, ...southeastasia];
+                break;
+            case 'westasia':
+                const western = await fetchCapitals('subregion', 'western asia');
+                const southern = await fetchCapitals('subregion', 'southern asia');
+                fetchedCapitals = [...western, ...southern];
                 break;
             case 'asia':
-                fetchedCapitals = await fetchCountryCapitals('asia');
+                fetchedCapitals = await fetchCapitals('region', 'asia');
+                break;
+            case 'caribbean':
+                fetchedCapitals = await fetchCapitals('subregion', 'caribbean');
+                break;
+            case 'southamerica':
+                fetchedCapitals = await fetchCapitals('subregion', 'south america');
                 break;
             case 'oceania':
-                fetchedCapitals = await fetchCountryCapitals('oceania');
+                fetchedCapitals = await fetchCapitals('region', 'oceania');
                 break;
             default:
                 console.error("Invalid grouping selected:", grouping);
