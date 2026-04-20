@@ -78,15 +78,35 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await response.json();
             console.log(`Fetched raw capitals for ${type} '${value}':`, data);
 
-            let transformedData = data
-                .filter(country => country.capital?.[0] && country.capitalInfo?.latlng?.length === 2)
-                .map(country => ({
-                    city: country.capital[0],
-                    country: country.name.common,
-                    lat: country.capitalInfo.latlng[0],
-                    lon: country.capitalInfo.latlng[1],
-                }));
-            console.log(`Transformed capitals for ${type} '${value}':`, transformedData);
+            // Use reduce to handle countries with multiple capitals, creating a flat list.
+            let transformedData = await data.reduce(async (accPromise, country) => {
+                const acc = await accPromise;
+                if (country.capital && country.capital.length > 0) {
+                    for (let i = 0; i < country.capital.length; i++) {
+                        const capitalName = country.capital[i];
+                        const countryname = country.name.common;
+                        // Handle the primary capital using the provided lat/lon
+                        if (i === 0 && country.capitalInfo?.latlng?.length === 2) {
+                            acc.push({
+                                city: capitalName,
+                                country: countryname,
+                                lat: country.capitalInfo.latlng[0],
+                                lon: country.capitalInfo.latlng[1],
+                            });
+                        } else if (i > 0) {
+                            const coords = await getCityCoordinates(capitalName, country.name.common);
+                            if (coords) {
+                                acc.push({ 
+                                    city: capitalName, 
+                                    country: countryname, 
+                                    lat: coords.latitude, 
+                                    lon: coords.longitude});
+                            }
+                        }
+                    }
+                }
+                return acc;
+            }, Promise.resolve([]));
 
             // --- Data Patching ---
             // A list of cities with known data issues that need to be corrected via Nominatim.
