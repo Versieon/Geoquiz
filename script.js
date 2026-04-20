@@ -78,30 +78,74 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await response.json();
             console.log(`Fetched raw capitals for ${type} '${value}':`, data);
 
-            const transformedData = data
+            let transformedData = data
                 .filter(country => country.capital?.[0] && country.capitalInfo?.latlng?.length === 2)
                 .map(country => ({
                     city: country.capital[0],
                     country: country.name.common,
                     lat: country.capitalInfo.latlng[0],
-                    lon: country.capitalInfo.latlng[1]
+                    lon: country.capitalInfo.latlng[1],
                 }));
             console.log(`Transformed capitals for ${type} '${value}':`, transformedData);
 
-            // Data patch for "El Aaiún" which has reversed lat/lon from the API
-            const elAaiun = transformedData.find(c => c.city === 'El Aaiún');
-            if (elAaiun) {
-                const tempLat = elAaiun.lat;
-                elAaiun.lat = elAaiun.lon;
-                elAaiun.lon = tempLat;
+            // --- Data Patching ---
+            // A list of cities with known data issues that need to be corrected via Nominatim.
+            // If patching fails for a city, it will be removed from the game pool.
+            const citiesToPatch = ['El Aaiún', 'Mata-Utu'];
+            const finalData = [];
+            for (const capital of transformedData) {
+                if (citiesToPatch.includes(capital.city)) {
+                    console.log(`Applying data patch for ${capital.city}. Original coords:`, { lat: capital.lat, lon: capital.lon });
+                    const newCoords = await getCityCoordinates(capital.city, capital.country);
+                    if (newCoords) {
+                        capital.lat = newCoords.latitude;
+                        capital.lon = newCoords.longitude;
+                        finalData.push(capital); // Add the successfully patched capital
+                        console.log(`Successfully patched ${capital.city}.`);
+                    }
+                } else {
+                    finalData.push(capital); // Add non-patched capitals directly
+                }
             }
-
-            return transformedData;
+            return finalData;
         } catch (error) {
             console.error(`Could not fetch capitals for ${type} '${value}':`, error);
             return []; // Return empty array on error
         }
     }
+
+    async function getCityCoordinates(cityName, countryname) {
+        try {
+            // First attempt: Search with both city and country for specificity
+            let url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cityName)}+${encodeURIComponent(countryname)}&format=json`;
+            let response = await fetch(url);
+            let data = await response.json();
+
+            // Fallback: If the first search failed, try again with just the city name
+            if (!data || data.length === 0) {
+                console.log(`Specific search failed for "${cityName}, ${countryname}". Trying fallback.`);
+                url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cityName)}&format=json`;
+                response = await fetch(url);
+                data = await response.json();
+            }
+
+            // If we have data from either search, process it
+            if (data && data.length > 0) {
+                console.log(`Found coordinates for "${cityName}".`);
+                const lat = parseFloat(parseFloat(data[0].lat).toFixed(2));
+                const lon = parseFloat(parseFloat(data[0].lon).toFixed(2));
+                return { latitude: lat, longitude: lon };
+            }
+
+            // If both searches failed
+            console.log(`All searches failed for "${cityName}".`);
+            return null;
+        } catch (error) {
+            console.error("Error fetching coordinates:", error);
+            return null;
+        }
+    }
+
 
     /**
      * Fetches and transforms US state capital data from a public API.
@@ -347,9 +391,16 @@ document.addEventListener('DOMContentLoaded', () => {
      * Calculates distance between two lat/lon points in km using Haversine formula.
      */
     function getDistance(lat1, lon1, lat2, lon2) {
+        // Calculate the difference in longitude, and adjust for the shortest path around the globe
+        let lonDiff = lon2 - lon1;
+        if (lonDiff > 180) {
+            lonDiff -= 360;
+        } else if (lonDiff < -180) {
+            lonDiff += 360;
+        }
         const R = 6371; // Radius of the Earth in km
         const dLat = (lat2 - lat1) * Math.PI / 180;
-        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const dLon = lonDiff * Math.PI / 180;
         const a =
             Math.sin(dLat / 2) * Math.sin(dLat / 2) +
             Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
@@ -483,13 +534,26 @@ document.addEventListener('DOMContentLoaded', () => {
             nextRoundBtn.textContent = 'Next Round';
         }
 
-        // Show markers and line on the map
-        guessMarker = L.marker([guessLat, guessLon], { opacity: 0.6 }).addTo(map);
-        answerMarker = L.marker([answerLat, answerLon]).addTo(map).bindPopup(`Actual Location`).openPopup();
-        answerLine = L.polyline([[guessLat, guessLon], [answerLat, answerLon]], { color: 'red' }).addTo(map);
+        let displayGuessLon = guessLon;
+        let displayAnswerLon = answerLon;
 
-        // Fit map to show both points
-        map.fitBounds(answerLine.getBounds().pad(0.1));
+        // If the shortest path crosses the anti-meridian...
+        if (Math.abs(guessLon - answerLon) > 180) {
+            // ...denormalize the longitudes to be in the same "world copy"
+            if (guessLon < 0) displayGuessLon += 360;
+            if (answerLon < 0) displayAnswerLon += 360;
+        }
+
+        // Create markers, line, and bounds using the same (potentially denormalized) coordinates
+        const guessPoint = [guessLat, displayGuessLon];
+        const answerPoint = [answerLat, displayAnswerLon];
+
+        guessMarker = L.marker(guessPoint, { opacity: 0.6 }).addTo(map);
+        answerMarker = L.marker(answerPoint).addTo(map).bindPopup(`Actual Location`).openPopup();
+        answerLine = L.polyline([guessPoint, answerPoint], { color: 'red' }).addTo(map);
+        
+        const bounds = L.latLngBounds([guessPoint, answerPoint]);
+        map.fitBounds(bounds.pad(0.2));
     }
 
     // --- Event Listeners ---
