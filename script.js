@@ -111,10 +111,15 @@ document.addEventListener('DOMContentLoaded', () => {
             // --- Data Patching ---
             // A list of cities with known data issues that need to be corrected via Nominatim.
             // If patching fails for a city, it will be removed from the game pool.
-            const citiesToPatch = ['El Aaiún', 'Mata-Utu'];
+            const citiesToPatch = [
+                { city: 'El Aaiún', country: 'Western Sahara' },
+                { city: 'Mata-Utu', country: 'Wallis and Futuna' },
+                { city: "St. George's", country: 'Grenada' }
+            ];
             const finalData = [];
             for (const capital of transformedData) {
-                if (citiesToPatch.includes(capital.city)) {
+                // Check if the current capital matches both city and country of a patch target
+                if (citiesToPatch.some(p => p.city === capital.city && p.country === capital.country)) {
                     console.log(`Applying data patch for ${capital.city}. Original coords:`, { lat: capital.lat, lon: capital.lon });
                     const newCoords = await getCityCoordinates(capital.city, capital.country);
                     if (newCoords) {
