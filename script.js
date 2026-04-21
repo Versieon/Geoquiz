@@ -54,8 +54,140 @@ document.addEventListener('DOMContentLoaded', () => {
     let minstreak = 0;
     // --- Functions ---
 
+    /**
+     * Takes raw country data and returns a list of capitals with coordinates verified by Nominatim.
+     * This serves as a potential replacement for fetchCapitals.
+     * @param {string} type - The type of fetch ('region', 'subregion', 'all').
+     * @param {string} value - The value for the type (e.g., 'europe').
+     * @returns {Promise<Array>} A promise that resolves to an array of capital objects.
+     */
+    async function fetchCapitalsAndCities(type, value, N) {
+        const fields = 'name,capital,cca2'; // We need cca2 for the GeoNames API
+        const baseUrl = 'https://restcountries.com/v4/';
+        let endpoint = '';
+
+        if (type === 'all') {
+            endpoint = 'all';
+        } else if (type === 'region' || type === 'subregion') {
+            endpoint = `${type}/${value}`;
+        } else {
+            console.error(`Invalid fetch type: ${type}`);
+            return [];
+        }
+
+        const url = `${baseUrl}${endpoint}?fields=${fields}`;
+
+        try {
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            const rawCountriesData = await response.json();
+            const verifiedCapitals = [];
+            for (const country of rawCountriesData) {
+                if (country.capital && country.capital.length > 0) {
+                    const countryname = country.name.common;
+                    for (const capitalName of country.capital) {
+                        verifiedCapitals.push({ city: capitalName, country: countryname });
+                    }
+                    if (N > 0) {
+                        const countryCode = country.cca2;
+
+                        if (countryCode) {
+                            const countrycities = await fetchCities_new(country, countryCode, N);
+                            // Create a Set of existing city IDs for efficient lookup
+                            const existingCityIds = new Set(verifiedCapitals.map(getCityId));
+                            const uniqueNewCities = countrycities.filter(city => !existingCityIds.has(getCityId(city)));
+                            verifiedCapitals.push(...uniqueNewCities);
+                        }
+                    }
+                }
+            }
+            
+            return verifiedCapitals;
+        } catch (error) {
+            console.error(`Could not fetch new capitals for ${type} '${value}':`, error);
+            return [];
+        }
+    }
+
+    /**
+     * A new function to fetch the top N most populous cities for a given country
+     * using the more reliable OpenDataSoft API.
+     * @param {string} countryCode - The two-letter ISO code for the country (e.g., 'IE', 'US').
+     * @param {number} N - The number of top cities to fetch.
+     * @returns {Promise<Array>} A promise that resolves to an array of city objects.
+     */
+    async function fetchCities_new(country, countryCode, N) {
+        const url = `https://public.opendatasoft.com/api/records/1.0/search/?dataset=geonames-all-cities-with-a-population-1000&rows=${N}&sort=population&refine.country_code=${countryCode}`;
+
+        try {
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error(`OpenDataSoft API error! status: ${response.status}`);
+            }
+            const data = await response.json();
+            if (!data.records) {
+                console.log(`No cities found for ${countryCode} on OpenDataSoft, or data structure is invalid.`);
+                return [];
+            }
+
+            // Transform the OpenDataSoft data into our application's format.
+            const cities = data.records.map(record => ({
+                city: record.fields.name,
+                country: country
+            }));
+
+            console.log(`Fetched top ${cities.length} cities for ${countryCode} from OpenDataSoft:`, cities);
+            return cities;
+        } catch (error) {
+            console.error(`Could not fetch top cities for ${countryCode} from OpenDataSoft:`, error);
+            return [];
+        }
+    }
+
+    /**
+     * Fetches the top N most populous cities for a given country.
+     * @param {string} countryCode - The two-letter ISO code for the country (e.g., 'IE', 'US').
+     * @param {number} N - The number of top cities to fetch.
+     * @returns {Promise<Array>} A promise that resolves to an array of city objects.
+     */
+    async function fetchCities(countryCode, N) {
+        // Using the more reliable GeoNames API.
+        // We fetch cities with population > 0, sort by population, and take the top N.
+        const url = `https://secure.geonames.org/searchJSON?country=${countryCode}&featureClass=P&orderby=population&maxRows=${N}&username=demo`;
+
+        try {
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error(`GeoNames API error! status: ${response.status}`);
+            }
+            const data = await response.json();
+            // GeoNames API returns a 'status' object on error (e.g., rate limit exceeded).
+            if (data.status) {
+                throw new Error(`GeoNames API returned an error: ${data.status.message}`);
+            }
+            if (!data.geonames) {
+                console.log(`No cities found for ${countryCode} on GeoNames, or data structure is invalid.`);
+                return []; // Return empty array if no results or unexpected structure
+            }
+
+            // Transform the GeoNames data into our application's format.
+            const cities = data.geonames.map(city => ({
+                city: city.name,
+                country: city.countryName
+            }));
+
+            console.log(`Fetched top ${cities.length} cities for ${countryCode}:`, cities);
+            return cities;
+        } catch (error) {
+            console.error(`Could not fetch top cities for ${countryCode}:`, error);
+            return [];
+        }
+    }
+
     async function fetchCapitals(type, value) {
-        const fields = 'name,capital,capitalInfo';
+        const fields = 'name,capital,capitalInfo,cca2';
         const baseUrl = 'https://restcountries.com/v4/';
         let endpoint = '';
 
@@ -171,6 +303,52 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    async function fetchUrl(url) {
+        try {
+            let response = await fetch(url);
+            let data = await response.json();
+            return data;
+        } catch (error) {
+            console.error("Error fetching data:", error);
+            return null;
+        }
+    }
+
+    async function getCityCoordinatesFull(capital) {
+        const cityName = capital.city;
+        const countryname = capital.country;
+        // First attempt: Search with both city and country for specificity
+        let url = `https://nominatim.openstreetmap.org/search?city=${encodeURIComponent(cityName)}&country=${encodeURIComponent(countryname)}&format=json`;
+        let data = await fetchUrl(url);
+
+        // Fallback: If the first search failed, try again with just the city name
+        if (!data || data.length === 0) {
+            console.log(`Specific search failed for "${cityName}, ${countryname}". Trying first fallback.`);
+            url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cityName)}+${encodeURIComponent(countryname)}&format=json`;
+            data = await fetchUrl(url);
+        }
+
+        if (!data || data.length === 0) {
+            console.log(`Specific search failed for "${cityName}, ${countryname}". Trying final fallback.`);
+            url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cityName)}&format=json`;
+            data = await fetchUrl(url);
+        }
+
+        // If we have data from either search, process it
+        if (data && data.length > 0) {
+            console.log(`Found coordinates for "${cityName}" at url ${url}.`);
+            const lat = parseFloat(parseFloat(data[0].lat).toFixed(2));
+            const lon = parseFloat(parseFloat(data[0].lon).toFixed(2));
+            capital.lat = lat;
+            capital.lon = lon;
+            return capital;
+        }
+
+        // If both searches failed
+        console.log(`All searches failed for "${cityName}".`);
+        return null;
+    }
+
 
     /**
      * Fetches and transforms US state capital data from a public API.
@@ -209,7 +387,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function getCityId(capital) {
-        return `${capital.city}-${capital.country}`;
+        return `${capital.city}-${capital.country}`.toLowerCase();
     }
 
     function generateSimplifiedExponential(inputList) {
@@ -282,7 +460,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 fetchedCapitals = await fetchUsStateCapitals();
                 break;
             case 'europe':
-                fetchedCapitals = await fetchCapitals('region', 'europe');
+                fetchedCapitals = await fetchCapitalsAndCities('region', 'europe', 5);
                 break;
             case 'all':
                 fetchedCapitals = await fetchCapitals('all');
@@ -438,7 +616,7 @@ document.addEventListener('DOMContentLoaded', () => {
      * Calculates a score from 0 to 100 based on the distance.
      * The score decreases as the distance increases.
      */
-    function calculateScore(distance) {
+    function calculateScore(distance) { 
         const maxDistance = 4000; // Max distance in km for scoring
         if (distance > maxDistance) {
             return 0;
@@ -451,7 +629,7 @@ document.addEventListener('DOMContentLoaded', () => {
     /**
      * Starts a new round of the game.
      */
-    function startNewRound() {
+    async function startNewRound() {
         // 0. Increment round counter and update UI
         currentRound++;
         totalRoundsEl.textContent = totalRounds;
@@ -490,6 +668,25 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             // Fallback: if both lists are exhausted, pick randomly from the original pool
             currentCapital = currentCapitalPool[Math.floor(Math.random() * currentCapitalPool.length)];
+        }
+        
+        // If the chosen capital is missing coordinates, fetch them.
+        if (!currentCapital.lat || !currentCapital.lon) {
+            console.log(`Coordinates missing for ${currentCapital.city}. Fetching...`);
+            const updatedCapital = await getCityCoordinatesFull(currentCapital);
+            if (updatedCapital) {
+                currentCapital = updatedCapital; // Use the updated capital for this round.
+                // Find and update the capital in the main pool for future rounds.
+                const indexToUpdate = availableCapitals.findIndex(c => getCityId(c) === getCityId(updatedCapital));
+                if (indexToUpdate !== -1) {
+                    availableCapitals[indexToUpdate] = updatedCapital;
+                    console.log(`Updated ${currentCapital.city} in the available capitals pool.`);
+                }
+            } else {
+                console.error(`Failed to fetch coordinates for ${currentCapital.city}. Skipping to next round.`);
+                startNewRound(); // Try again with a different capital.
+                return; // Stop execution of the current broken round.
+            }
         }
 
         // Manage the recently chosen list
