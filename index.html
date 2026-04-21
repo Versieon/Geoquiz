@@ -13,6 +13,11 @@
 
     <div id="setup-container">
         <h1>World Capital Quiz</h1>
+        <div id="mode-selection">
+            <label><input type="radio" name="gameMode" value="capitals" checked> Capitals</label>
+            <label><input type="radio" name="gameMode" value="cities"> Largest Cities</label>
+        </div>
+        <hr>
         <div id="grouping-selection">
             <div class="region-group">
                 <h3>Global &amp; Special</h3>
@@ -37,6 +42,13 @@
                 <button class="grouping-btn" data-grouping="europe">Europe</button>
                 <button class="grouping-btn" data-grouping="africa">Africa</button>
                 <button class="grouping-btn" data-grouping="oceania">Oceania</button>
+            </div>
+            <div id="country-selection-container" style="display: none;">
+                <p>Select a Country:</p>
+                <select id="country-select"></select>
+                <label for="city-count-input">Number of cities:</label>
+                <input type="number" id="city-count-input" value="10" min="1" max="20" step="1" style="width: 60px; margin: 0 10px;">
+                <button id="start-cities-game-btn">Start Game with Cities</button>
             </div>
         </div>
 

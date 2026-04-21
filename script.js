@@ -4,6 +4,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const groupingButtons = document.querySelectorAll('.grouping-btn');
     const roundsSelection = document.getElementById('rounds-selection');
     const startGameBtn = document.getElementById('start-game-btn');
+    const modeSelectionRadios = document.querySelectorAll('input[name="gameMode"]');
+    const countrySelectionContainer = document.getElementById('country-selection-container');
+    const countrySelect = document.getElementById('country-select');
+    const cityCountInput = document.getElementById('city-count-input');
     const mapContainer = document.getElementById('map');
     const uiContainer = document.getElementById('ui-container');
     const questionEl = document.getElementById('question');
@@ -45,6 +49,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let availableCapitals = [];
     let isEndlessMode = false;
     let selectedGrouping = null;
+    let gameMode = 'capitals'; // 'capitals' or 'cities'
 
     let currentCapitalPool = []; // The pool of capitals for the current game
     let WeightedCapitals = []; // Weighted list of previously played capitals for the current game
@@ -55,70 +60,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Functions ---
 
     /**
-     * Takes raw country data and returns a list of capitals with coordinates verified by Nominatim.
-     * This serves as a potential replacement for fetchCapitals.
-     * @param {string} type - The type of fetch ('region', 'subregion', 'all').
-     * @param {string} value - The value for the type (e.g., 'europe').
-     * @returns {Promise<Array>} A promise that resolves to an array of capital objects.
-     */
-    async function fetchCapitalsAndCities(type, value, N) {
-        const fields = 'name,capital,cca2'; // We need cca2 for the GeoNames API
-        const baseUrl = 'https://restcountries.com/v4/';
-        let endpoint = '';
-
-        if (type === 'all') {
-            endpoint = 'all';
-        } else if (type === 'region' || type === 'subregion') {
-            endpoint = `${type}/${value}`;
-        } else {
-            console.error(`Invalid fetch type: ${type}`);
-            return [];
-        }
-
-        const url = `${baseUrl}${endpoint}?fields=${fields}`;
-
-        try {
-            const response = await fetch(url);
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            const rawCountriesData = await response.json();
-            const verifiedCapitals = [];
-            for (const country of rawCountriesData) {
-                if (country.capital && country.capital.length > 0) {
-                    const countryname = country.name.common;
-                    for (const capitalName of country.capital) {
-                        verifiedCapitals.push({ city: capitalName, country: countryname });
-                    }
-                    if (N > 0) {
-                        const countryCode = country.cca2;
-
-                        if (countryCode) {
-                            const countrycities = await fetchCities_new(country, countryCode, N);
-                            // Create a Set of existing city IDs for efficient lookup
-                            const existingCityIds = new Set(verifiedCapitals.map(getCityId));
-                            const uniqueNewCities = countrycities.filter(city => !existingCityIds.has(getCityId(city)));
-                            verifiedCapitals.push(...uniqueNewCities);
-                        }
-                    }
-                }
-            }
-            
-            return verifiedCapitals;
-        } catch (error) {
-            console.error(`Could not fetch new capitals for ${type} '${value}':`, error);
-            return [];
-        }
-    }
-
-    /**
-     * A new function to fetch the top N most populous cities for a given country
-     * using the more reliable OpenDataSoft API.
      * @param {string} countryCode - The two-letter ISO code for the country (e.g., 'IE', 'US').
      * @param {number} N - The number of top cities to fetch.
      * @returns {Promise<Array>} A promise that resolves to an array of city objects.
      */
-    async function fetchCities_new(country, countryCode, N) {
+    async function fetchCities(countryName, countryCode, N) {
         const url = `https://public.opendatasoft.com/api/records/1.0/search/?dataset=geonames-all-cities-with-a-population-1000&rows=${N}&sort=population&refine.country_code=${countryCode}`;
 
         try {
@@ -135,53 +81,13 @@ document.addEventListener('DOMContentLoaded', () => {
             // Transform the OpenDataSoft data into our application's format.
             const cities = data.records.map(record => ({
                 city: record.fields.name,
-                country: country
+                country: countryName
             }));
 
             console.log(`Fetched top ${cities.length} cities for ${countryCode} from OpenDataSoft:`, cities);
             return cities;
         } catch (error) {
             console.error(`Could not fetch top cities for ${countryCode} from OpenDataSoft:`, error);
-            return [];
-        }
-    }
-
-    /**
-     * Fetches the top N most populous cities for a given country.
-     * @param {string} countryCode - The two-letter ISO code for the country (e.g., 'IE', 'US').
-     * @param {number} N - The number of top cities to fetch.
-     * @returns {Promise<Array>} A promise that resolves to an array of city objects.
-     */
-    async function fetchCities(countryCode, N) {
-        // Using the more reliable GeoNames API.
-        // We fetch cities with population > 0, sort by population, and take the top N.
-        const url = `https://secure.geonames.org/searchJSON?country=${countryCode}&featureClass=P&orderby=population&maxRows=${N}&username=demo`;
-
-        try {
-            const response = await fetch(url);
-            if (!response.ok) {
-                throw new Error(`GeoNames API error! status: ${response.status}`);
-            }
-            const data = await response.json();
-            // GeoNames API returns a 'status' object on error (e.g., rate limit exceeded).
-            if (data.status) {
-                throw new Error(`GeoNames API returned an error: ${data.status.message}`);
-            }
-            if (!data.geonames) {
-                console.log(`No cities found for ${countryCode} on GeoNames, or data structure is invalid.`);
-                return []; // Return empty array if no results or unexpected structure
-            }
-
-            // Transform the GeoNames data into our application's format.
-            const cities = data.geonames.map(city => ({
-                city: city.name,
-                country: city.countryName
-            }));
-
-            console.log(`Fetched top ${cities.length} cities for ${countryCode}:`, cities);
-            return cities;
-        } catch (error) {
-            console.error(`Could not fetch top cities for ${countryCode}:`, error);
             return [];
         }
     }
@@ -217,23 +123,23 @@ document.addEventListener('DOMContentLoaded', () => {
                     for (let i = 0; i < country.capital.length; i++) {
                         const capitalName = country.capital[i];
                         const countryname = country.name.common;
+                        const cca2 = country.cca2;
+
                         // Handle the primary capital using the provided lat/lon
                         if (i === 0 && country.capitalInfo?.latlng?.length === 2) {
                             acc.push({
                                 city: capitalName,
                                 country: countryname,
+                                cca2: cca2,
                                 lat: country.capitalInfo.latlng[0],
                                 lon: country.capitalInfo.latlng[1],
                             });
                         } else if (i > 0) {
-                            const coords = await getCityCoordinates(capitalName, country.name.common);
-                            if (coords) {
-                                acc.push({ 
-                                    city: capitalName, 
-                                    country: countryname, 
-                                    lat: coords.latitude, 
-                                    lon: coords.longitude});
-                            }
+                            acc.push({ 
+                                city: capitalName, 
+                                country: countryname, 
+                                cca2: cca2
+                            });
                         }
                     }
                 }
@@ -253,11 +159,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Check if the current capital matches both city and country of a patch target
                 if (citiesToPatch.some(p => p.city === capital.city && p.country === capital.country)) {
                     console.log(`Applying data patch for ${capital.city}. Original coords:`, { lat: capital.lat, lon: capital.lon });
-                    const newCoords = await getCityCoordinates(capital.city, capital.country);
-                    if (newCoords) {
-                        capital.lat = newCoords.latitude;
-                        capital.lon = newCoords.longitude;
-                        finalData.push(capital); // Add the successfully patched capital
+                    const newCapital = await getCityCoordinatesFull(capital);
+                    if (newCapital) {
+                        finalData.push(newCapital); // Add the successfully patched capital
                         console.log(`Successfully patched ${capital.city}.`);
                     }
                 } else {
@@ -268,38 +172,6 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (error) {
             console.error(`Could not fetch capitals for ${type} '${value}':`, error);
             return []; // Return empty array on error
-        }
-    }
-
-    async function getCityCoordinates(cityName, countryname) {
-        try {
-            // First attempt: Search with both city and country for specificity
-            let url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cityName)}+${encodeURIComponent(countryname)}&format=json`;
-            let response = await fetch(url);
-            let data = await response.json();
-
-            // Fallback: If the first search failed, try again with just the city name
-            if (!data || data.length === 0) {
-                console.log(`Specific search failed for "${cityName}, ${countryname}". Trying fallback.`);
-                url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cityName)}&format=json`;
-                response = await fetch(url);
-                data = await response.json();
-            }
-
-            // If we have data from either search, process it
-            if (data && data.length > 0) {
-                console.log(`Found coordinates for "${cityName}".`);
-                const lat = parseFloat(parseFloat(data[0].lat).toFixed(2));
-                const lon = parseFloat(parseFloat(data[0].lon).toFixed(2));
-                return { latitude: lat, longitude: lon };
-            }
-
-            // If both searches failed
-            console.log(`All searches failed for "${cityName}".`);
-            return null;
-        } catch (error) {
-            console.error("Error fetching coordinates:", error);
-            return null;
         }
     }
 
@@ -446,21 +318,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         return result;
     }
-    /**
-     * Starts the game with a selected number of rounds.
-     */
-    async function startGame(grouping) {
-        startGameBtn.disabled = true;
-        startGameBtn.textContent = 'Loading...';
 
-        // 1. Fetch data on-demand based on the selected grouping
+    async function getGrouping(grouping) {
         let fetchedCapitals = [];
         switch (grouping) {
             case 'usstates':
                 fetchedCapitals = await fetchUsStateCapitals();
                 break;
             case 'europe':
-                fetchedCapitals = await fetchCapitalsAndCities('region', 'europe', 5);
+                fetchedCapitals = await fetchCapitals('region', 'europe', 5);
                 break;
             case 'all':
                 fetchedCapitals = await fetchCapitals('all');
@@ -501,10 +367,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 break;
             default:
                 console.error("Invalid grouping selected:", grouping);
-                startGameBtn.disabled = false;
-                startGameBtn.textContent = 'Start Game';
-                return;
+                return [];
         }
+        return fetchedCapitals;
+    }
+
+    /**
+     * Starts the game with a selected number of rounds.
+     */
+    async function startGame(grouping, preFetchedCapitals = null) {
+        startGameBtn.disabled = true;
+        startGameBtn.textContent = 'Loading...';
+        let fetchedCapitals = preFetchedCapitals || await getGrouping(grouping);
 
         if (fetchedCapitals.length === 0) {
             alert("Could not load capital data for this grouping. Please try again.");
@@ -779,13 +653,51 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Event Listeners ---
+    modeSelectionRadios.forEach(radio => {
+        radio.addEventListener('change', (e) => {
+            gameMode = e.target.value;
+            // Hide other UI sections when mode changes to force re-selection
+            roundsSelection.style.display = 'none';
+            countrySelectionContainer.style.display = 'none';
+            groupingButtons.forEach(btn => btn.classList.remove('selected'));
+        });
+    });
+
     groupingButtons.forEach(button => {
-        button.addEventListener('click', (e) => {
+        button.addEventListener('click', async (e) => {
             selectedGrouping = e.target.getAttribute('data-grouping');
             groupingButtons.forEach(btn => btn.classList.remove('selected'));
             e.target.classList.add('selected');
-            roundsSelection.style.display = 'block'; // Show the container with the start button
-            startGameBtn.disabled = false; // Enable the start button
+
+            if (gameMode === 'capitals') {
+                countrySelectionContainer.style.display = 'none';
+                roundsSelection.style.display = 'block';
+                startGameBtn.disabled = false;
+            } else { // gameMode === 'cities'
+                roundsSelection.style.display = 'none';
+                countrySelect.innerHTML = '<option>Loading countries...</option>';
+                countrySelectionContainer.style.display = 'block';
+
+                // Fetch countries for the selected region
+                console.log('Fetching countries for grouping:', selectedGrouping);
+                const countries = await getGrouping(selectedGrouping)
+                console.log('Fetched countries:', countries);
+
+                countrySelect.innerHTML = ''; // Clear loading message
+                if (countries.length > 0) {
+                    // Sort countries alphabetically
+                    countries.sort((a, b) => a.country.localeCompare(b.country));
+
+                    countries.forEach(country => {
+                        const option = document.createElement('option');
+                        option.value =  country.cca2;
+                        option.textContent = country.country;
+                        countrySelect.appendChild(option);
+                    });
+                } else {
+                    countrySelect.innerHTML = '<option>No countries found</option>';
+                }
+            }
         });
     });
 
@@ -794,6 +706,17 @@ document.addEventListener('DOMContentLoaded', () => {
             // Always start in endless mode
             await startGame(selectedGrouping);
         }
+    });
+
+    document.getElementById('start-cities-game-btn').addEventListener('click', async () => {
+        const selectedCountryCode = countrySelect.value;
+        const countryName = countrySelect.options[countrySelect.selectedIndex].text;
+        const cityCount = parseInt(cityCountInput.value, 10);
+        if (!selectedCountryCode || !cityCount) return;
+
+        console.log(`Fetching top ${cityCount} cities for country: ${countryName} (${selectedCountryCode})`);
+        const cities = await fetchCities(countryName, selectedCountryCode, cityCount);
+        await startGame(selectedGrouping, cities);
     });
 
     nextRoundBtn.addEventListener('click', () => {
