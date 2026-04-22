@@ -4,7 +4,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const groupingButtons = document.querySelectorAll('.grouping-btn');
     const roundsSelection = document.getElementById('rounds-selection');
     const startGameBtn = document.getElementById('start-game-btn');
-    const modeSelectionRadios = document.querySelectorAll('input[name="gameMode"]');
+    const modeButtons = document.querySelectorAll('.mode-btn');
     const countrySelectionContainer = document.getElementById('country-selection-container');
     const countrySelect = document.getElementById('country-select');
     const cityCountInput = document.getElementById('city-count-input');
@@ -648,14 +648,20 @@ document.addEventListener('DOMContentLoaded', () => {
         answerMarker = L.marker(answerPoint).addTo(map).bindPopup(`Actual Location`).openPopup();
         answerLine = L.polyline([guessPoint, answerPoint], { color: 'red' }).addTo(map);
         
-        const bounds = L.latLngBounds([guessPoint, answerPoint]);
-        map.fitBounds(bounds.pad(0.2));
+        // Only zoom the map if the guess and answer aren't already visible.
+        const requiredBounds = L.latLngBounds([guessPoint, answerPoint]);
+        if (!map.getBounds().contains(requiredBounds)) {
+            map.fitBounds(requiredBounds.pad(0.2));
+        }
     }
 
     // --- Event Listeners ---
-    modeSelectionRadios.forEach(radio => {
-        radio.addEventListener('change', (e) => {
-            gameMode = e.target.value;
+    modeButtons.forEach(button => {
+        button.addEventListener('click', (e) => {
+            gameMode = e.target.getAttribute('data-mode');
+            modeButtons.forEach(btn => btn.classList.remove('selected'));
+            e.target.classList.add('selected');
+
             // Hide other UI sections when mode changes to force re-selection
             roundsSelection.style.display = 'none';
             countrySelectionContainer.style.display = 'none';
