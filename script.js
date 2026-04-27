@@ -152,7 +152,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const citiesToPatch = [
                 { city: 'El Aaiún', country: 'Western Sahara' },
                 { city: 'Mata-Utu', country: 'Wallis and Futuna' },
-                { city: "St. George's", country: 'Grenada' }
+                { city: "St. George's", country: 'Grenada' },
+                { city: "Ciudad de la Paz", country: 'Equatorial Guinea'}
             ];
             const finalData = [];
             for (const capital of transformedData) {
