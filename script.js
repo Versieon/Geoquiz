@@ -22,15 +22,34 @@ document.addEventListener('DOMContentLoaded', () => {
     const finalScoreEl = document.getElementById('final-score');
     const maxPossibleScoreEl = document.getElementById('max-possible-score');
 
+    // --- Data Patching ---
+    // A list of cities with known data issues that need to be corrected via Nominatim.
+    // If patching fails for a city, it will be removed from the game pool.
+    const citiesToPatch = [
+        { city: 'El Aaiún', country: 'Western Sahara' },
+        { city: 'Mata-Utu', country: 'Wallis and Futuna' },
+        { city: "St. George's", country: 'Grenada' },
+        { city: "Ciudad de la Paz", country: 'Equatorial Guinea'},
+        { city: "Sarajevo", country: 'Bosnia and Herzegovina'}
+
+    ];
+
+    // --- Configurable Variables ---
+    let RECENT_CAPITALS_LIMIT = 2; // How many recent capitals to avoid picking
+    let MIN_ZOOM = 3;
+    let MAX_ZOOM = 8;
+    let MAX_SCORE_DISTANCE = 4000;
+    let CORRECT_SCORE_THRESHOLD = 98;
+
     // --- Map Initialization ---
     const map = L.map('map', {
         center: [20, 0],
         zoom: 3,
-        minZoom: 3, 
-        maxZoom: 8, 
+        minZoom: MIN_ZOOM, 
+        maxZoom: MAX_ZOOM, 
     });
 
-    // Switched to a satellite tile layer with no labels
+
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
         attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
         referrerPolicy: 'origin',
@@ -53,10 +72,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let currentCapitalPool = []; // The pool of capitals for the current game
     let WeightedCapitals = []; // Weighted list of previously played capitals for the current game
-    const RECENT_CAPITALS_LIMIT = 2; // How many recent capitals to avoid picking
     let recentlyChosenCapitals = []; // Stores the last N chosen capitals
     let cityScores = {}; // Stores best scores for each city: { "city-country": bestScore }
-    let minstreak = 0;
+
     // --- Functions ---
 
     /**
@@ -146,15 +164,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 return acc;
             }, Promise.resolve([]));
 
-            // --- Data Patching ---
-            // A list of cities with known data issues that need to be corrected via Nominatim.
-            // If patching fails for a city, it will be removed from the game pool.
-            const citiesToPatch = [
-                { city: 'El Aaiún', country: 'Western Sahara' },
-                { city: 'Mata-Utu', country: 'Wallis and Futuna' },
-                { city: "St. George's", country: 'Grenada' },
-                { city: "Ciudad de la Paz", country: 'Equatorial Guinea'}
-            ];
             const finalData = [];
             for (const capital of transformedData) {
                 // Check if the current capital matches both city and country of a patch target
@@ -445,7 +454,6 @@ document.addEventListener('DOMContentLoaded', () => {
      * @param {number} score - The score achieved in the round.
      */
     function saveCityScore(capital, score) {
-        const CORRECT_SCORE_THRESHOLD = 98;
         const cityId = getCityId(capital);
         const streak = cityScores[cityId]?.streak || 0;
         // Get existing data or create a new entry
@@ -492,12 +500,11 @@ document.addEventListener('DOMContentLoaded', () => {
      * The score decreases as the distance increases.
      */
     function calculateScore(distance) { 
-        const maxDistance = 4000; // Max distance in km for scoring
-        if (distance > maxDistance) {
+        if (distance > MAX_SCORE_DISTANCE) {
             return 0;
         }
         // A non-linear scoring works well. We use a power to make it harder.
-        const score = 100 * Math.pow(1 - (distance / maxDistance), 2);
+        const score = 100 * Math.pow(1 - (distance / MAX_SCORE_DISTANCE), 2);
         return Math.round(score);
     }
 

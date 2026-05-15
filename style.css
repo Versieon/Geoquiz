@@ -70,7 +70,10 @@ html, body {
     padding: 10px 20px;
     margin: 5px;
 }
-
+.mode-btn {
+    padding: 10px 20px;
+    margin: 5px;
+}
 /* Styles for the new grouping layout */
 #grouping-selection {
     display: flex;
