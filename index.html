@@ -13,6 +13,7 @@
 
     <div id="setup-container">
         <h1>World Capital Quiz</h1>
+        <button id="settings-btn" class="icon-btn" title="Settings">⚙️</button>
         <div id="mode-selection">
             <button class="mode-btn selected" data-mode="capitals">Capitals</button>
             <button class="mode-btn" data-mode="cities">Largest Cities</button>
@@ -73,6 +74,34 @@
         <h2>Game Over!</h2>
         <p>Your final score is <b id="final-score">0</b> out of <b id="max-possible-score">0</b>.</p>
         <button id="play-again-btn">Play Again</button>
+    </div>
+
+    <div id="settings-overlay" style="display: none;">
+        <div id="settings-panel">
+            <h2>Settings</h2>
+            <div class="setting-item">
+                <label for="setting-min-zoom">Min Zoom:</label>
+                <input type="number" id="setting-min-zoom" min="1" max="18" step="1">
+            </div>
+            <div class="setting-item">
+                <label for="setting-max-zoom">Max Zoom:</label>
+                <input type="number" id="setting-max-zoom" min="1" max="18" step="1">
+            </div>
+            <div class="setting-item">
+                <label for="setting-max-score-distance">Max Score Distance (km):</label>
+                <input type="number" id="setting-max-score-distance" min="100" step="100">
+            </div>
+            <div class="setting-item">
+                <label for="setting-correct-threshold">"Correct" Score Threshold:</label>
+                <input type="number" id="setting-correct-threshold" min="1" max="100">
+            </div>
+            <div class="setting-item">
+                <label for="setting-recent-capitals">Recent Capitals to Avoid:</label>
+                <input type="number" id="setting-recent-capitals" min="0" max="20">
+            </div>
+            <button id="save-settings-btn">Save & Close</button>
+            <button id="reset-settings-btn">Reset to Defaults</button>
+        </div>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"

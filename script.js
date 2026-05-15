@@ -21,6 +21,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const totalScoreEl = document.getElementById('total-score');
     const finalScoreEl = document.getElementById('final-score');
     const maxPossibleScoreEl = document.getElementById('max-possible-score');
+    const settingsBtn = document.getElementById('settings-btn');
+    const settingsOverlay = document.getElementById('settings-overlay');
+    const saveSettingsBtn = document.getElementById('save-settings-btn');
+    const resetSettingsBtn = document.getElementById('reset-settings-btn');
+    const settingMinZoom = document.getElementById('setting-min-zoom');
+    const settingMaxZoom = document.getElementById('setting-max-zoom');
+    const settingMaxScoreDistance = document.getElementById('setting-max-score-distance');
+    const settingCorrectThreshold = document.getElementById('setting-correct-threshold');
+    const settingRecentCapitals = document.getElementById('setting-recent-capitals');
+
 
     // --- Data Patching ---
     // A list of cities with known data issues that need to be corrected via Nominatim.
@@ -34,12 +44,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     ];
 
+    // --- Default Configurable Variables ---
+    const DEFAULTS = {
+        RECENT_CAPITALS_LIMIT: 2,
+        MIN_ZOOM: 3,
+        MAX_ZOOM: 8,
+        MAX_SCORE_DISTANCE: 4000,
+        CORRECT_SCORE_THRESHOLD: 98,
+    };
+
     // --- Configurable Variables ---
-    let RECENT_CAPITALS_LIMIT = 2; // How many recent capitals to avoid picking
-    let MIN_ZOOM = 3;
-    let MAX_ZOOM = 8;
-    let MAX_SCORE_DISTANCE = 4000;
-    let CORRECT_SCORE_THRESHOLD = 98;
+    let RECENT_CAPITALS_LIMIT;
+    let MIN_ZOOM;
+    let MAX_ZOOM;
+    let MAX_SCORE_DISTANCE;
+    let CORRECT_SCORE_THRESHOLD;
 
     // --- Map Initialization ---
     const map = L.map('map', {
@@ -664,6 +683,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Event Listeners ---
+
     modeButtons.forEach(button => {
         button.addEventListener('click', (e) => {
             gameMode = e.target.getAttribute('data-mode');
@@ -761,7 +781,91 @@ document.addEventListener('DOMContentLoaded', () => {
         selectedGrouping = null;
     });
 
+    settingsBtn.addEventListener('click', () => {
+        // Populate settings panel with current values
+        settingMinZoom.value = MIN_ZOOM;
+        settingMaxZoom.value = MAX_ZOOM;
+        settingMaxScoreDistance.value = MAX_SCORE_DISTANCE;
+        settingCorrectThreshold.value = CORRECT_SCORE_THRESHOLD;
+        settingRecentCapitals.value = RECENT_CAPITALS_LIMIT;
+
+        settingsOverlay.style.display = 'flex';
+    });
+
+    saveSettingsBtn.addEventListener('click', () => {
+        // Read and validate values
+        const newMinZoom = parseInt(settingMinZoom.value, 10);
+        const newMaxZoom = parseInt(settingMaxZoom.value, 10);
+
+        if (newMinZoom >= newMaxZoom) {
+            alert("Min Zoom must be less than Max Zoom.");
+            return;
+        }
+
+        // Update variables
+        MIN_ZOOM = newMinZoom;
+        MAX_ZOOM = newMaxZoom;
+        MAX_SCORE_DISTANCE = parseInt(settingMaxScoreDistance.value, 10);
+        CORRECT_SCORE_THRESHOLD = parseInt(settingCorrectThreshold.value, 10);
+        RECENT_CAPITALS_LIMIT = parseInt(settingRecentCapitals.value, 10);
+
+        // Apply live changes
+        map.setMinZoom(MIN_ZOOM);
+        map.setMaxZoom(MAX_ZOOM);
+        if (map.getZoom() < MIN_ZOOM) map.setZoom(MIN_ZOOM);
+        if (map.getZoom() > MAX_ZOOM) map.setZoom(MAX_ZOOM);
+
+        // Save to localStorage
+        const userSettings = {
+            MIN_ZOOM,
+            MAX_ZOOM,
+            MAX_SCORE_DISTANCE,
+            CORRECT_SCORE_THRESHOLD,
+            RECENT_CAPITALS_LIMIT
+        };
+        localStorage.setItem('mapQuizSettings', JSON.stringify(userSettings));
+
+        settingsOverlay.style.display = 'none';
+    });
+
+    resetSettingsBtn.addEventListener('click', () => {
+        if (confirm("Are you sure you want to reset all settings to their defaults?")) {
+            localStorage.removeItem('mapQuizSettings');
+            applySettings(); // Re-apply the default settings
+            // Close the panel
+            settingsOverlay.style.display = 'none';
+        }
+    });
+
+    // Close settings panel if user clicks on the overlay
+    settingsOverlay.addEventListener('click', (e) => {
+        if (e.target === settingsOverlay) {
+            settingsOverlay.style.display = 'none';
+        }
+    });
+
+    /**
+     * Loads settings from localStorage or applies defaults.
+     */
+    function applySettings() {
+        const savedSettings = JSON.parse(localStorage.getItem('mapQuizSettings'));
+
+        RECENT_CAPITALS_LIMIT = savedSettings?.RECENT_CAPITALS_LIMIT ?? DEFAULTS.RECENT_CAPITALS_LIMIT;
+        MIN_ZOOM = savedSettings?.MIN_ZOOM ?? DEFAULTS.MIN_ZOOM;
+        MAX_ZOOM = savedSettings?.MAX_ZOOM ?? DEFAULTS.MAX_ZOOM;
+        MAX_SCORE_DISTANCE = savedSettings?.MAX_SCORE_DISTANCE ?? DEFAULTS.MAX_SCORE_DISTANCE;
+        CORRECT_SCORE_THRESHOLD = savedSettings?.CORRECT_SCORE_THRESHOLD ?? DEFAULTS.CORRECT_SCORE_THRESHOLD;
+
+        // Apply to map instance
+        map.setMinZoom(MIN_ZOOM);
+        map.setMaxZoom(MAX_ZOOM);
+
+        console.log("Applied settings:", { MIN_ZOOM, MAX_ZOOM, MAX_SCORE_DISTANCE, CORRECT_SCORE_THRESHOLD, RECENT_CAPITALS_LIMIT });
+    }
+
+
     // --- Initial Setup ---
+    applySettings(); // Load user settings or defaults
     loadCityScores(); // Load any existing user scores from localStorage
 
 });
