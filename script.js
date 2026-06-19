@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const cityCountInput = document.getElementById('city-count-input');
     const mapContainer = document.getElementById('map');
     const uiContainer = document.getElementById('ui-container');
+    const loadingIndicator = document.getElementById('loading-indicator');
     const questionEl = document.getElementById('question');
     const quitGameBtn = document.getElementById('quit-game-btn');
     const resultEl = document.getElementById('result');
@@ -30,19 +31,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const settingMaxScoreDistance = document.getElementById('setting-max-score-distance');
     const settingCorrectThreshold = document.getElementById('setting-correct-threshold');
     const settingRecentCapitals = document.getElementById('setting-recent-capitals');
+    const settingIncludeTerritories = document.getElementById('setting-include-territories');
 
-
-    // --- Data Patching ---
-    // A list of cities with known data issues that need to be corrected via Nominatim.
-    // If patching fails for a city, it will be removed from the game pool.
-    const citiesToPatch = [
-        { city: 'El Aaiún', country: 'Western Sahara' },
-        { city: 'Mata-Utu', country: 'Wallis and Futuna' },
-        { city: "St. George's", country: 'Grenada' },
-        { city: "Ciudad de la Paz", country: 'Equatorial Guinea'},
-        { city: "Sarajevo", country: 'Bosnia and Herzegovina'}
-
-    ];
 
     // --- Default Configurable Variables ---
     const DEFAULTS = {
@@ -51,6 +41,7 @@ document.addEventListener('DOMContentLoaded', () => {
         MAX_ZOOM: 8,
         MAX_SCORE_DISTANCE: 4000,
         CORRECT_SCORE_THRESHOLD: 98,
+        INCLUDE_TERRITORIES: true,
     };
 
     // --- Configurable Variables ---
@@ -59,6 +50,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let MAX_ZOOM;
     let MAX_SCORE_DISTANCE;
     let CORRECT_SCORE_THRESHOLD;
+    let INCLUDE_TERRITORIES;
 
     // --- Map Initialization ---
     const map = L.map('map', {
@@ -90,6 +82,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let gameMode = 'capitals'; // 'capitals' or 'cities'
 
     let currentCapitalPool = []; // The pool of capitals for the current game
+    let allWorldCapitals = []; // Holds all capitals from the local JSON file
     let WeightedCapitals = []; // Weighted list of previously played capitals for the current game
     let recentlyChosenCapitals = []; // Stores the last N chosen capitals
     let cityScores = {}; // Stores best scores for each city: { "city-country": bestScore }
@@ -126,81 +119,6 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (error) {
             console.error(`Could not fetch top cities for ${countryCode} from OpenDataSoft:`, error);
             return [];
-        }
-    }
-
-    async function fetchCapitals(type, value) {
-        const fields = 'name,capital,capitalInfo,cca2';
-        const baseUrl = 'https://restcountries.com/v4/';
-        let endpoint = '';
-
-        if (type === 'all') {
-            endpoint = 'all';
-        } else if (type === 'region' || type === 'subregion') {
-            endpoint = `${type}/${value}`;
-        } else {
-            console.error(`Invalid fetch type: ${type}`);
-            return [];
-        }
-
-        const url = `${baseUrl}${endpoint}?fields=${fields}`;
-
-        try {
-            const response = await fetch(url);
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            const data = await response.json();
-            console.log(`Fetched raw capitals for ${type} '${value}':`, data);
-
-            // Use reduce to handle countries with multiple capitals, creating a flat list.
-            let transformedData = await data.reduce(async (accPromise, country) => {
-                const acc = await accPromise;
-                if (country.capital && country.capital.length > 0) {
-                    for (let i = 0; i < country.capital.length; i++) {
-                        const capitalName = country.capital[i];
-                        const countryname = country.name.common;
-                        const cca2 = country.cca2;
-
-                        // Handle the primary capital using the provided lat/lon
-                        if (i === 0 && country.capitalInfo?.latlng?.length === 2) {
-                            acc.push({
-                                city: capitalName,
-                                country: countryname,
-                                cca2: cca2,
-                                lat: country.capitalInfo.latlng[0],
-                                lon: country.capitalInfo.latlng[1],
-                            });
-                        } else if (i > 0) {
-                            acc.push({ 
-                                city: capitalName, 
-                                country: countryname, 
-                                cca2: cca2
-                            });
-                        }
-                    }
-                }
-                return acc;
-            }, Promise.resolve([]));
-
-            const finalData = [];
-            for (const capital of transformedData) {
-                // Check if the current capital matches both city and country of a patch target
-                if (citiesToPatch.some(p => p.city === capital.city && p.country === capital.country)) {
-                    console.log(`Applying data patch for ${capital.city}. Original coords:`, { lat: capital.lat, lon: capital.lon });
-                    const newCapital = await getCityCoordinatesFull(capital);
-                    if (newCapital) {
-                        finalData.push(newCapital); // Add the successfully patched capital
-                        console.log(`Successfully patched ${capital.city}.`);
-                    }
-                } else {
-                    finalData.push(capital); // Add non-patched capitals directly
-                }
-            }
-            return finalData;
-        } catch (error) {
-            console.error(`Could not fetch capitals for ${type} '${value}':`, error);
-            return []; // Return empty array on error
         }
     }
 
@@ -348,57 +266,55 @@ document.addEventListener('DOMContentLoaded', () => {
         return result;
     }
 
+    /**
+     * Filters the local allWorldCapitals list based on the selected grouping.
+     * @param {string} grouping - The selected grouping (e.g., 'europe', 'all').
+     * @returns {Promise<Array>} A promise that resolves to an array of capital objects.
+     */
     async function getGrouping(grouping) {
-        let fetchedCapitals = [];
-        switch (grouping) {
-            case 'usstates':
-                fetchedCapitals = await fetchUsStateCapitals();
-                break;
-            case 'europe':
-                fetchedCapitals = await fetchCapitals('region', 'europe', 5);
-                break;
-            case 'all':
-                fetchedCapitals = await fetchCapitals('all');
-                break;
-            case 'africa':
-                fetchedCapitals = await fetchCapitals('region', 'africa');
-                break;
-            case 'americas':
-                fetchedCapitals = await fetchCapitals('region', 'americas');
-                break;
-            case 'northamerica':
-                const northern = await fetchCapitals('subregion', 'north america');
-                const central = await fetchCapitals('subregion', 'central america');
-                fetchedCapitals = [...northern, ...central];
-                break;
-            case 'eastasia':
-                const centralasia = await fetchCapitals('subregion', 'central asia');
-                const eastasia = await fetchCapitals('subregion', 'eastern asia');
-                const southeastasia = await fetchCapitals('subregion', 'south-eastern asia');
-                fetchedCapitals = [...centralasia, ...eastasia, ...southeastasia];
-                break;
-            case 'westasia':
-                const western = await fetchCapitals('subregion', 'western asia');
-                const southern = await fetchCapitals('subregion', 'southern asia');
-                fetchedCapitals = [...western, ...southern];
-                break;
-            case 'asia':
-                fetchedCapitals = await fetchCapitals('region', 'asia');
-                break;
-            case 'caribbean':
-                fetchedCapitals = await fetchCapitals('subregion', 'caribbean');
-                break;
-            case 'southamerica':
-                fetchedCapitals = await fetchCapitals('subregion', 'south america');
-                break;
-            case 'oceania':
-                fetchedCapitals = await fetchCapitals('region', 'oceania');
-                break;
-            default:
-                console.error("Invalid grouping selected:", grouping);
-                return [];
+        if (grouping === 'usstates') {
+            return await fetchUsStateCapitals();
         }
-        return fetchedCapitals;
+
+        // For all other groupings, filter the main list
+        const continentMap = {
+            'europe': 'Europe',
+            'africa': 'Africa',
+            'asia': 'Asia',
+            'oceania': 'Oceania',
+            'northamerica': 'North America',
+            'southamerica': 'South America',
+        };
+
+        let capitalPool = allWorldCapitals;
+
+        // Filter out non-countries if the setting is disabled
+        if (!INCLUDE_TERRITORIES) {
+            capitalPool = allWorldCapitals.filter(c => c.type === 'Country');
+        }
+
+        if (grouping === 'all') {
+            return capitalPool;
+        } else if (continentMap[grouping]) {
+            return capitalPool.filter(c => c.continent === continentMap[grouping]);
+        } else if (grouping === 'americas') {
+            return capitalPool.filter(c => c.continent === 'North America' || c.continent === 'South America');
+        } else if (grouping === 'caribbean') {
+            return capitalPool.filter(c => c.subregion === 'Caribbean');
+        } else if (grouping === 'eastasia') {
+            const eastAsiaSubregions = ['Eastern Asia', 'South-Eastern Asia', 'Central Asia'];
+            return capitalPool.filter(c => eastAsiaSubregions.includes(c.subregion));
+        } else if (grouping === 'westasia') {
+            const westAsiaSubregions = ['Western Asia', 'Southern Asia'];
+            return capitalPool.filter(c => westAsiaSubregions.includes(c.subregion));
+        } else if (grouping === 'northamerica') {
+            // This now correctly includes Central America as per the button text
+            const northAmericaSubregions = ['Northern America', 'Central America', 'Caribbean'];
+            return capitalPool.filter(c => c.continent === 'North America' && northAmericaSubregions.includes(c.subregion));
+        } else {
+            console.error("Invalid grouping selected:", grouping);
+            return [];
+        }
     }
 
     /**
@@ -788,6 +704,7 @@ document.addEventListener('DOMContentLoaded', () => {
         settingMaxScoreDistance.value = MAX_SCORE_DISTANCE;
         settingCorrectThreshold.value = CORRECT_SCORE_THRESHOLD;
         settingRecentCapitals.value = RECENT_CAPITALS_LIMIT;
+        settingIncludeTerritories.checked = INCLUDE_TERRITORIES;
 
         settingsOverlay.style.display = 'flex';
     });
@@ -808,6 +725,7 @@ document.addEventListener('DOMContentLoaded', () => {
         MAX_SCORE_DISTANCE = parseInt(settingMaxScoreDistance.value, 10);
         CORRECT_SCORE_THRESHOLD = parseInt(settingCorrectThreshold.value, 10);
         RECENT_CAPITALS_LIMIT = parseInt(settingRecentCapitals.value, 10);
+        INCLUDE_TERRITORIES = settingIncludeTerritories.checked;
 
         // Apply live changes
         map.setMinZoom(MIN_ZOOM);
@@ -821,7 +739,8 @@ document.addEventListener('DOMContentLoaded', () => {
             MAX_ZOOM,
             MAX_SCORE_DISTANCE,
             CORRECT_SCORE_THRESHOLD,
-            RECENT_CAPITALS_LIMIT
+            RECENT_CAPITALS_LIMIT,
+            INCLUDE_TERRITORIES
         };
         localStorage.setItem('mapQuizSettings', JSON.stringify(userSettings));
 
@@ -855,17 +774,55 @@ document.addEventListener('DOMContentLoaded', () => {
         MAX_ZOOM = savedSettings?.MAX_ZOOM ?? DEFAULTS.MAX_ZOOM;
         MAX_SCORE_DISTANCE = savedSettings?.MAX_SCORE_DISTANCE ?? DEFAULTS.MAX_SCORE_DISTANCE;
         CORRECT_SCORE_THRESHOLD = savedSettings?.CORRECT_SCORE_THRESHOLD ?? DEFAULTS.CORRECT_SCORE_THRESHOLD;
+        INCLUDE_TERRITORIES = savedSettings?.INCLUDE_TERRITORIES ?? DEFAULTS.INCLUDE_TERRITORIES;
 
         // Apply to map instance
         map.setMinZoom(MIN_ZOOM);
         map.setMaxZoom(MAX_ZOOM);
 
-        console.log("Applied settings:", { MIN_ZOOM, MAX_ZOOM, MAX_SCORE_DISTANCE, CORRECT_SCORE_THRESHOLD, RECENT_CAPITALS_LIMIT });
+        console.log("Applied settings:", { MIN_ZOOM, MAX_ZOOM, MAX_SCORE_DISTANCE, CORRECT_SCORE_THRESHOLD, RECENT_CAPITALS_LIMIT, INCLUDE_TERRITORIES });
     }
 
+
+    /**
+     * Fetches the local capital data and initializes the application.
+     */
+    async function initializeApp() {
+        try {
+            // Fetch both data files concurrently for efficiency
+            const [capitalsResponse, codesResponse] = await Promise.all([
+                fetch('capitals.json'),
+                fetch('countrycodes.json')
+            ]);
+
+            const capitalsData = await capitalsResponse.json();
+            const countryCodesData = await codesResponse.json();
+
+            // Create a Map for quick country code lookups
+            const countryCodeMap = new Map(countryCodesData.map(item => [item.country, item.cc2]));
+
+            // Merge the country codes into the main capitals data
+            allWorldCapitals = capitalsData.map(capital => {
+                const countryName = capital.country;
+                const countryCode = countryCodeMap.get(countryName);
+                if (!countryCode) {
+                    console.error(`Failed to find country code for: "${countryName}". Please check for a mismatch in your JSON files.`);
+                }
+                capital.cca2 = countryCode;
+                return capital;
+            });
+
+            console.log(`Loaded and merged data for ${allWorldCapitals.length} world capitals.`);
+            loadingIndicator.style.display = 'none';
+            setupContainer.style.display = 'block';
+        } catch (error) {
+            console.error("Failed to load local capitals.json:", error);
+            loadingIndicator.textContent = 'Error: Could not load game data. Please refresh the page.';
+        }
+    }
 
     // --- Initial Setup ---
     applySettings(); // Load user settings or defaults
     loadCityScores(); // Load any existing user scores from localStorage
-
+    initializeApp(); // Fetch data and show setup screen
 });

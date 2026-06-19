@@ -11,7 +11,9 @@
 </head>
 <body>
 
-    <div id="setup-container">
+    <div id="loading-indicator">Loading game data...</div>
+
+    <div id="setup-container" style="display: none;">
         <h1>World Capital Quiz</h1>
         <button id="settings-btn" class="icon-btn" title="Settings">⚙️</button>
         <div id="mode-selection">
@@ -98,6 +100,10 @@
             <div class="setting-item">
                 <label for="setting-recent-capitals">Recent Capitals to Avoid:</label>
                 <input type="number" id="setting-recent-capitals" min="0" max="20">
+            </div>
+            <div class="setting-item">
+                <label for="setting-include-territories">Include Territories & Regions:</label>
+                <input type="checkbox" id="setting-include-territories">
             </div>
             <button id="save-settings-btn">Save & Close</button>
             <button id="reset-settings-btn">Reset to Defaults</button>
